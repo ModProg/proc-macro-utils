@@ -1,0 +1,21 @@
+[package]
+name = "proc-macro-utils"
+version = "0.1.0"
+edition = "2021"
+categories = []
+description = ""
+keywords = []
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/ModProg/proc-macro-utils"
+documentation = "https://docs.rs/proc-macro-utils"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+proc-macro2 = { version = "1", optional = true }
+
+[features]
+default = ["proc-macro2"]
+
+[dev-dependencies]
+quote = "1"
