@@ -2,9 +2,9 @@
 name = "proc-macro-utils"
 version = "0.1.0"
 edition = "2021"
-categories = []
-description = ""
-keywords = []
+categories = ["procedural-macro-helpers"]
+description = "low-level utilities on proc-macro and proc-macro2 types"
+keywords = ["macros"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/ModProg/proc-macro-utils"
