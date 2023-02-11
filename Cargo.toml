@@ -2,7 +2,7 @@
 name = "proc-macro-utils"
 version = "0.2.0"
 edition = "2021"
-categories = ["procedural-macro-helpers"]
+categories = ["development-tools::procedural-macro-helpers"]
 description = "low-level utilities on proc-macro and proc-macro2 types"
 keywords = ["macros"]
 license = "MIT"
