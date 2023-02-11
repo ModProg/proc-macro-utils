@@ -5,6 +5,8 @@
 #![warn(clippy::pedantic)]
 #![deny(missing_docs)]
 
+// TODO consider splitting up the traits
+
 macro_rules! once {
     (($($tts:tt)*) $($tail:tt)*) => {
         $($tts)*
@@ -65,6 +67,45 @@ impl_via_trait! {
     }
 }
 
+macro_rules! token_tree_ext {
+    ($($a:literal, $token:literal, $is:ident, $as:ident, $variant:ident);+$(;)?) => {
+        impl_via_trait! {
+            /// Generic extensions for
+            #[cfg_attr(feature = "proc-macro2", doc = "[`proc_macro2::TokenTree`]")]
+            #[cfg_attr(all(proc_macro, feature = "proc-macro2"), doc = "and")]
+            #[cfg_attr(proc_macro, doc = "[`proc_macro::TokenTree`]")]
+            #[cfg_attr(not(any(proc_macro, feature = "proc-macro2")), doc = "`proc_macro::TokenTree`")]
+            impl TokenTreeExt for TokenTree {
+                $(
+                    #[doc = concat!(stringify!($variant), " of this TokenTree, necessary to support both TokenTrees")]
+                    type $variant = $variant;
+                )*
+                $(
+                    #[doc = concat!("Tests if the token tree is ", $a, " ", $token, ".")]
+                    fn $is(&self) -> bool {
+                        matches!(self, Self::$variant(_))
+                    }
+                    #[doc = concat!("Get the `", stringify!($variant), "` inside this token tree, or [`None`] if it isn't ", $a, " ", $token, ".")]
+                    fn $as(self) -> Option<<Self as TokenTreeExt>::$variant> {
+                        if let Self::$variant(inner) = self {
+                            Some(inner)
+                        } else {
+                            None
+                        }
+                    }
+                )*
+            }
+        }
+    };
+}
+
+token_tree_ext!(
+    "a", "group", is_group, group, Group;
+    "an", "ident", is_ident, ident, Ident;
+    "a", "punctuation", is_punct, punct, Punct;
+    "a", "literal", is_literal, literal, Literal;
+);
+
 macro_rules! punctuations {
     ($($char:literal as $name:ident),*) => {
         impl_via_trait!{
@@ -106,35 +147,66 @@ punctuations![
     '#' as is_pound,
     '$' as is_dollar,
     '?' as is_question,
-    '\'' as is_single_quote // TODO naming
+    '\'' as is_quote // TODO naming
 ];
 
-#[cfg(feature = "proc-macro2")]
-#[test]
-fn punctuation() {
+#[cfg(all(test, feature = "proc-macro2"))]
+mod test {
+    use proc_macro2::{Punct, Spacing, TokenTree};
     use quote::quote;
 
-    let mut tokens = quote! {=<>!$~+-*/%^|@.,;:#$?'a}.into_iter();
-    assert!(tokens.next().unwrap().is_equals());
-    assert!(tokens.next().unwrap().is_less_than());
-    assert!(tokens.next().unwrap().is_greater_than());
-    assert!(tokens.next().unwrap().is_exclamation());
-    assert!(tokens.next().unwrap().is_dollar());
-    assert!(tokens.next().unwrap().is_tilde());
-    assert!(tokens.next().unwrap().is_plus());
-    assert!(tokens.next().unwrap().is_minus());
-    assert!(tokens.next().unwrap().is_asterix());
-    assert!(tokens.next().unwrap().is_slash());
-    assert!(tokens.next().unwrap().is_percent());
-    assert!(tokens.next().unwrap().is_caret());
-    assert!(tokens.next().unwrap().is_pipe());
-    assert!(tokens.next().unwrap().is_at());
-    assert!(tokens.next().unwrap().is_dot());
-    assert!(tokens.next().unwrap().is_comma());
-    assert!(tokens.next().unwrap().is_semi());
-    assert!(tokens.next().unwrap().is_colon());
-    assert!(tokens.next().unwrap().is_pound());
-    assert!(tokens.next().unwrap().is_dollar());
-    assert!(tokens.next().unwrap().is_question());
-    assert!(tokens.next().unwrap().is_single_quote());
+    use super::*;
+
+    #[test]
+    fn punctuation() {
+        let mut tokens = quote! {=<>!$~+-*/%^|@.,;:#$?'a}.into_iter();
+        assert!(tokens.next().unwrap().is_equals());
+        assert!(tokens.next().unwrap().is_less_than());
+        assert!(tokens.next().unwrap().is_greater_than());
+        assert!(tokens.next().unwrap().is_exclamation());
+        assert!(tokens.next().unwrap().is_dollar());
+        assert!(tokens.next().unwrap().is_tilde());
+        assert!(tokens.next().unwrap().is_plus());
+        assert!(tokens.next().unwrap().is_minus());
+        assert!(tokens.next().unwrap().is_asterix());
+        assert!(tokens.next().unwrap().is_slash());
+        assert!(tokens.next().unwrap().is_percent());
+        assert!(tokens.next().unwrap().is_caret());
+        assert!(tokens.next().unwrap().is_pipe());
+        assert!(tokens.next().unwrap().is_at());
+        assert!(tokens.next().unwrap().is_dot());
+        assert!(tokens.next().unwrap().is_comma());
+        assert!(tokens.next().unwrap().is_semi());
+        assert!(tokens.next().unwrap().is_colon());
+        assert!(tokens.next().unwrap().is_pound());
+        assert!(tokens.next().unwrap().is_dollar());
+        assert!(tokens.next().unwrap().is_question());
+        assert!(tokens.next().unwrap().is_quote());
+    }
+
+    #[test]
+    fn token_stream_ext() {
+        let mut tokens = quote!(a);
+        tokens.push(TokenTree::Punct(Punct::new(',', Spacing::Alone)));
+        assert_eq!(tokens.to_string(), "a ,");
+    }
+
+    #[test]
+    fn token_tree_ext() {
+        let mut tokens = quote!({group} ident + "literal").into_iter().peekable();
+        assert!(tokens.peek().unwrap().is_group());
+        assert_eq!(
+            tokens.next().unwrap().group().unwrap().to_string(),
+            "{ group }"
+        );
+        assert!(tokens.peek().unwrap().is_ident());
+        assert_eq!(tokens.next().unwrap().ident().unwrap().to_string(), "ident");
+        assert!(tokens.peek().unwrap().is_punct());
+        assert_eq!(tokens.next().unwrap().punct().unwrap().to_string(), "+");
+        assert!(tokens.peek().unwrap().is_literal());
+        assert_eq!(
+            tokens.next().unwrap().literal().unwrap().to_string(),
+            "\"literal\""
+        );
+    }
 }
