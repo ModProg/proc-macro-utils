@@ -1,6 +1,6 @@
 [package]
 name = "proc-macro-utils"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 categories = ["development-tools::procedural-macro-helpers"]
 description = "low-level utilities on proc-macro and proc-macro2 types"
@@ -15,7 +15,11 @@ documentation = "https://docs.rs/proc-macro-utils"
 proc-macro2 = { version = "1", optional = true }
 
 [features]
-default = ["proc-macro2"]
+default = ["proc-macro2", "proc-macro"]
+proc-macro = []
 
 [dev-dependencies]
 quote = "1"
+
+[workspace]
+members = ["example"]

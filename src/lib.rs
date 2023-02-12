@@ -5,6 +5,9 @@
 #![warn(clippy::pedantic)]
 #![deny(missing_docs)]
 
+#[cfg(feature = "proc-macro")]
+extern crate proc_macro;
+
 // TODO consider splitting up the traits
 
 macro_rules! once {
@@ -39,10 +42,11 @@ macro_rules! impl_via_trait {
                 })*
             }
         };
-        #[cfg(use_proc_macro)]
+        #[cfg(feature = "proc-macro")]
         const _:() = {
             use proc_macro::*;
             impl $trait for $type {
+                $(type $types = $type_assignment;)*
                 $(fn $function($($args)*) $(-> $ret)? {
                     $($stmts)*
                 })*
@@ -53,10 +57,10 @@ macro_rules! impl_via_trait {
 
 impl_via_trait! {
     /// Generic extensions for
+    #[cfg_attr(feature = "proc-macro", doc = "[`proc_macro::TokenStream`]")]
+    #[cfg_attr(all(feature = "proc-macro", feature = "proc-macro2"), doc = "and")]
     #[cfg_attr(feature = "proc-macro2", doc = "[`proc_macro2::TokenStream`]")]
-    #[cfg_attr(all(proc_macro, feature = "proc-macro2"), doc = "and")]
-    #[cfg_attr(proc_macro, doc = "[`proc_macro::TokenStream`]")]
-    #[cfg_attr(not(any(proc_macro, feature = "proc-macro2")), doc = "`proc_macro::TokenStream`")]
+    #[cfg_attr(not(any(feature = "proc-macro", feature = "proc-macro2")), doc = "`proc_macro::TokenStream`")]
     impl TokenStreamExt for TokenStream {
         /// TokenTree to support both proc_macro and proc_macro2
         type TokenTree = TokenTree;
@@ -71,10 +75,10 @@ macro_rules! token_tree_ext {
     ($($a:literal, $token:literal, $is:ident, $as:ident, $variant:ident);+$(;)?) => {
         impl_via_trait! {
             /// Generic extensions for
+            #[cfg_attr(feature = "proc-macro", doc = "[`proc_macro::TokenTree`]")]
+            #[cfg_attr(all(feature = "proc-macro", feature = "proc-macro2"), doc = "and")]
             #[cfg_attr(feature = "proc-macro2", doc = "[`proc_macro2::TokenTree`]")]
-            #[cfg_attr(all(proc_macro, feature = "proc-macro2"), doc = "and")]
-            #[cfg_attr(proc_macro, doc = "[`proc_macro::TokenTree`]")]
-            #[cfg_attr(not(any(proc_macro, feature = "proc-macro2")), doc = "`proc_macro::TokenTree`")]
+            #[cfg_attr(not(any(feature = "proc-macro", feature = "proc-macro2")), doc = "`proc_macro::TokenTree`")]
             impl TokenTreeExt for TokenTree {
                 $(
                     #[doc = concat!(stringify!($variant), " of this TokenTree, necessary to support both TokenTrees")]
