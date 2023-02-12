@@ -8,65 +8,93 @@
 #[cfg(feature = "proc-macro")]
 extern crate proc_macro;
 
-// TODO consider splitting up the traits
-
 macro_rules! once {
     (($($tts:tt)*) $($tail:tt)*) => {
         $($tts)*
     };
 }
 
+macro_rules! attr {
+    (($($attr:tt)*), $($item:tt)+) => {
+        $(#$attr)* $($item)+
+    };
+}
+
+macro_rules! trait_def {
+    ($item_attr:tt, $trait:ident, $($fn_attr:tt, $fn:ident, $args:tt, $($ret:ty)?),*) => {
+        attr!($item_attr,
+        pub trait $trait {
+            $(attr!($fn_attr, fn $fn $args $(-> $ret)?;);)*
+        });
+    };
+}
+
+macro_rules! trait_impl {
+    ($trait:ident, $type:ident, $($fn:ident, $args:tt, $($ret:ty)?, $stmts:tt),*) => {
+        impl $trait for $type {
+            $(fn $fn $args $(-> $ret)? $stmts)*
+        }
+    };
+}
+
 macro_rules! impl_via_trait {
-    (
-        $(
-            $(#$trait_attr:tt)*
-            impl $trait:ident for $type:ident {
-                $(#$first_attr:tt)*
-                $(type $types:ident = $type_assignment:ty; $(#$type_attr:tt)* )*
-                $(fn $function:ident($($args:tt)*) $(-> $ret:ty)? { $($stmts:tt)* } $(#$fn_attr:tt)* )*
-            }
-        )+
-    ) => {
-        once!($(($(#$trait_attr)* pub trait $trait {
-            $(#$first_attr)*
-            $(type $types; $(#$type_attr)*)*
-            $(fn $function($($args)*) $(-> $ret)?; $(#$fn_attr)*)*
-        }))?);
-        $(#[cfg(feature = "proc-macro2")]
+    ($(
+        $(#$trait_attr:tt)*
+        impl $trait:ident for $type:ident {
+            $($(#$fn_attr:tt)*
+            fn $fn:ident $args:tt $(-> $ret:ty)? { $($stmts:tt)* })*
+        }
+    )+) => {
+        once!($((trait_def!(($($trait_attr)*), $trait, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
+        #[cfg(feature = "proc-macro")]
+        const _: () = {
+            use proc_macro::*;
+            $(trait_impl!($trait, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
+        };
+        #[cfg(feature = "proc-macro2")]
         const _:() = {
             use proc_macro2::*;
-            impl $trait for $type {
-                $(type $types = $type_assignment;)*
-                $(fn $function($($args)*) $(-> $ret)? {
-                    $($stmts)*
-                })*
-            }
+            $(trait_impl!($trait, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
         };
+    };
+    (
+        mod $mod:ident, $mod2:ident {
+            $(
+                $(#$trait_attr:tt)*
+                impl $trait:ident$($doc:literal)?, $trait2:ident$($doc2:literal)?  for $type:ident {
+                    $($(#$fn_attr:tt)*
+                    fn $fn:ident $args:tt $(-> $ret:ty)? { $($stmts:tt)* })*
+                }
+            )+
+        }
+    ) => {
         #[cfg(feature = "proc-macro")]
-        const _:() = {
+        once!(($(pub use $mod::$trait;)+));
+        #[cfg(feature = "proc-macro")]
+        mod $mod {
             use proc_macro::*;
-            impl $trait for $type {
-                $(type $types = $type_assignment;)*
-                $(fn $function($($args)*) $(-> $ret)? {
-                    $($stmts)*
-                })*
-            }
-        };)+
+            once!($((trait_def!(($($trait_attr)* $([doc=$doc])?), $trait, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
+            $(trait_impl!($trait, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
+        }
+        #[cfg(feature = "proc-macro2")]
+        once!(($(pub use $mod2::$trait2;)+));
+        #[cfg(feature = "proc-macro2")]
+        mod $mod2 {
+            use proc_macro2::*;
+            once!($((trait_def!(($($trait_attr)*$([doc=$doc2])?), $trait2, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
+            $(trait_impl!($trait2, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
+        }
     };
 }
 
 impl_via_trait! {
-    /// Generic extensions for
-    #[cfg_attr(feature = "proc-macro", doc = "[`proc_macro::TokenStream`]")]
-    #[cfg_attr(all(feature = "proc-macro", feature = "proc-macro2"), doc = "and")]
-    #[cfg_attr(feature = "proc-macro2", doc = "[`proc_macro2::TokenStream`]")]
-    #[cfg_attr(not(any(feature = "proc-macro", feature = "proc-macro2")), doc = "`proc_macro::TokenStream`")]
-    impl TokenStreamExt for TokenStream {
-        /// TokenTree to support both proc_macro and proc_macro2
-        type TokenTree = TokenTree;
-        /// Pushes a single [`Self::TokenTree`] onto the token stream
-        fn push(&mut self, token: Self::TokenTree) {
-            self.extend(std::iter::once(token))
+    mod token_stream_ext, token_stream2_ext {
+        /// Generic extensions for 
+        impl TokenStreamExt "[`proc_macro::TokenStream`]", TokenStream2Ext "[`proc_macro2::TokenStream`]" for TokenStream {
+            /// Pushes a single [`TokenTree`] onto the token stream
+            fn push(&mut self, token: TokenTree) {
+                self.extend(std::iter::once(token))
+            }
         }
     }
 }
@@ -74,30 +102,24 @@ impl_via_trait! {
 macro_rules! token_tree_ext {
     ($($a:literal, $token:literal, $is:ident, $as:ident, $variant:ident);+$(;)?) => {
         impl_via_trait! {
-            /// Generic extensions for
-            #[cfg_attr(feature = "proc-macro", doc = "[`proc_macro::TokenTree`]")]
-            #[cfg_attr(all(feature = "proc-macro", feature = "proc-macro2"), doc = "and")]
-            #[cfg_attr(feature = "proc-macro2", doc = "[`proc_macro2::TokenTree`]")]
-            #[cfg_attr(not(any(feature = "proc-macro", feature = "proc-macro2")), doc = "`proc_macro::TokenTree`")]
-            impl TokenTreeExt for TokenTree {
-                $(
-                    #[doc = concat!(stringify!($variant), " of this TokenTree, necessary to support both TokenTrees")]
-                    type $variant = $variant;
-                )*
-                $(
-                    #[doc = concat!("Tests if the token tree is ", $a, " ", $token, ".")]
-                    fn $is(&self) -> bool {
-                        matches!(self, Self::$variant(_))
-                    }
-                    #[doc = concat!("Get the `", stringify!($variant), "` inside this token tree, or [`None`] if it isn't ", $a, " ", $token, ".")]
-                    fn $as(self) -> Option<<Self as TokenTreeExt>::$variant> {
-                        if let Self::$variant(inner) = self {
-                            Some(inner)
-                        } else {
-                            None
+            mod token_tree_ext, token_tree2_ext {
+                /// Generic extensions for
+                impl TokenTreeExt "[`proc_macro::TokenTree`]", TokenTree2Ext "[`proc_macro2::TokenTree`]"  for TokenTree {
+                    $(
+                        #[doc = concat!("Tests if the token tree is ", $a, " ", $token, ".")]
+                        fn $is(&self) -> bool {
+                            matches!(self, Self::$variant(_))
                         }
-                    }
-                )*
+                        #[doc = concat!("Get the [`", stringify!($variant), "`] inside this token tree, or [`None`] if it isn't ", $a, " ", $token, ".")]
+                        fn $as(self) -> Option<$variant> {
+                            if let Self::$variant(inner) = self {
+                                Some(inner)
+                            } else {
+                                None
+                            }
+                        }
+                    )*
+                }
             }
         }
     };
