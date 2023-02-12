@@ -3,8 +3,8 @@ name: Test
 on:
   push: null
   pull_request: null
-  schedule: 
-    - 0 12 * * *
+  schedule:
+    - cron: '0 12 * * *'
 
 jobs:
   test:
@@ -15,7 +15,7 @@ jobs:
           - stable
           - nightly
         features:
-          - ""
+          - ''
           - --no-default-features
           - --no-default-features --features proc-macro
           - --no-default-features --features proc-macro2
@@ -38,14 +38,10 @@ jobs:
         with:
           version: ${{ matrix.rust }}
       - name: Build
-        run:
-          cargo build ${{ matrix.features }} ${{ matrix.cargo_flags }}
+        run: cargo build ${{ matrix.features }} ${{ matrix.cargo_flags }}
       - name: Test
-        run:
-          cargo test ${{ matrix.features }} --all-targets --no-fail-fast --workspace
+        run: cargo test ${{ matrix.features }} --all-targets --no-fail-fast --workspace
       - name: Doc Test
-        run:
-          cargo test ${{ matrix.features }} --doc --no-fail-fast --workspace
+        run: cargo test ${{ matrix.features }} --doc --no-fail-fast --workspace
       - name: Build Docs
-        run:
-          cargo doc ${{ matrix.features }} --workspace --no-deps
+        run: cargo doc ${{ matrix.features }} --workspace --no-deps
