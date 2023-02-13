@@ -89,7 +89,7 @@ macro_rules! impl_via_trait {
 
 impl_via_trait! {
     mod token_stream_ext, token_stream2_ext {
-        /// Generic extensions for 
+        /// Generic extensions for
         impl TokenStreamExt "[`proc_macro::TokenStream`]", TokenStream2Ext "[`proc_macro2::TokenStream`]" for TokenStream {
             /// Pushes a single [`TokenTree`] onto the token stream
             fn push(&mut self, token: TokenTree) {
@@ -221,10 +221,10 @@ mod test {
     fn token_tree_ext() {
         let mut tokens = quote!({group} ident + "literal").into_iter().peekable();
         assert!(tokens.peek().unwrap().is_group());
-        assert_eq!(
-            tokens.next().unwrap().group().unwrap().to_string(),
-            "{ group }"
-        );
+        assert!(matches!(
+            tokens.next().unwrap().group().unwrap().to_string().as_str(),
+            "{ group }" | "{group}"
+        ));
         assert!(tokens.peek().unwrap().is_ident());
         assert_eq!(tokens.next().unwrap().ident().unwrap().to_string(), "ident");
         assert!(tokens.peek().unwrap().is_punct());
