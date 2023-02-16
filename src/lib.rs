@@ -8,6 +8,18 @@
 #[cfg(feature = "proc-macro")]
 extern crate proc_macro;
 
+/// Parsing of simple rust structures without syn
+#[cfg(feature = "proc-macro2")]
+pub mod parser;
+
+#[cfg(feature = "proc-macro2")]
+#[macro_use]
+mod assert;
+
+#[cfg(feature = "proc-macro2")]
+#[doc(hidden)]
+pub mod __private;
+
 macro_rules! once {
     (($($tts:tt)*) $($tail:tt)*) => {
         $($tts)*
@@ -100,7 +112,7 @@ impl_via_trait! {
 }
 
 macro_rules! token_tree_ext {
-    ($($a:literal, $token:literal, $is:ident, $as:ident, $variant:ident);+$(;)?) => {
+    ($($a:literal, $token:literal, $is:ident, $as:ident, $into:ident, $variant:ident);+$(;)?) => {
         impl_via_trait! {
             mod token_tree_ext, token_tree2_ext {
                 /// Generic extensions for
@@ -111,7 +123,15 @@ macro_rules! token_tree_ext {
                             matches!(self, Self::$variant(_))
                         }
                         #[doc = concat!("Get the [`", stringify!($variant), "`] inside this token tree, or [`None`] if it isn't ", $a, " ", $token, ".")]
-                        fn $as(self) -> Option<$variant> {
+                        fn $as(&self) -> Option<&$variant> {
+                            if let Self::$variant(inner) = &self {
+                                Some(inner)
+                            } else {
+                                None
+                            }
+                        }
+                        #[doc = concat!("Get the [`", stringify!($variant), "`] inside this token tree, or [`None`] if it isn't ", $a, " ", $token, ".")]
+                        fn $into(self) -> Option<$variant> {
                             if let Self::$variant(inner) = self {
                                 Some(inner)
                             } else {
@@ -126,10 +146,10 @@ macro_rules! token_tree_ext {
 }
 
 token_tree_ext!(
-    "a", "group", is_group, group, Group;
-    "an", "ident", is_ident, ident, Ident;
-    "a", "punctuation", is_punct, punct, Punct;
-    "a", "literal", is_literal, literal, Literal;
+    "a", "group", is_group, group, into_group, Group;
+    "an", "ident", is_ident, ident, into_ident, Ident;
+    "a", "punctuation", is_punct, punct, into_punct, Punct;
+    "a", "literal", is_literal, literal, into_literal, Literal;
 );
 
 macro_rules! punctuations {
@@ -139,13 +159,28 @@ macro_rules! punctuations {
             impl TokenTreePunct for TokenTree {
                 $(#[doc = concat!("Tests if the token is `", $char, "`")]
                 fn $name(&self) -> bool {
-                    matches!(self, TokenTree::Punct(punct) if punct.as_char() == $char)
+                    matches!(self, TokenTree::Punct(punct) if punct.$name())
                 })*
+                /// Tests if token is followed by some none punctuation token or whitespace.
+                fn is_alone(&self) -> bool {
+                    matches!(self, TokenTree::Punct(punct) if punct.is_alone())
+                }
+                /// Tests if token is followed by another punct and can potentially be combined into
+                /// a multi-character operator.
+                fn is_joint(&self) -> bool {
+                    matches!(self, TokenTree::Punct(punct) if punct.is_joint())
+                }
             }
             impl TokenTreePunct for Punct {
                 $(fn $name(&self) -> bool {
                     self.as_char() == $char
                 })*
+                fn is_alone(&self) -> bool {
+                    self.spacing() == Spacing::Alone
+                }
+                fn is_joint(&self) -> bool {
+                    self.spacing() == Spacing::Joint
+                }
             }
         }
     };
@@ -174,6 +209,33 @@ punctuations![
     '$' as is_dollar,
     '?' as is_question,
     '\'' as is_quote // TODO naming
+];
+
+macro_rules! delimited {
+    ($($delimiter:ident as $name:ident : $doc:literal),*) => {
+        impl_via_trait!{
+            /// Trait to test for delimiters of groups
+            impl Delimited for TokenTree {
+                $(#[doc = concat!("Tests if the token is a group with ", $doc)]
+                fn $name(&self) -> bool {
+                    matches!(self, TokenTree::Group(group) if group.$name())
+                })*
+            }
+            impl Delimited for Group {
+                $(#[doc = concat!("Tests if a group has ", $doc)]
+                fn $name(&self) -> bool {
+                    matches!(self.delimiter(), Delimiter::$delimiter)
+                })*
+            }
+        }
+    };
+}
+
+delimited![
+    Parenthesis as is_parenthesized: " parentheses (`( ... )`)",
+    Brace as is_braced: " braces (`{ ... }`)",
+    Bracket as is_bracketed: " brackets (`[ ... ]`)",
+    None as is_implicitly_delimited: " no delimiters (`Ø ... Ø`)"
 ];
 
 #[cfg(all(test, feature = "proc-macro2"))]
