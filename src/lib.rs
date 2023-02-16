@@ -10,7 +10,9 @@ extern crate proc_macro;
 
 /// Parsing of simple rust structures without syn
 #[cfg(feature = "proc-macro2")]
-pub mod parser;
+mod parser;
+#[cfg(feature = "proc-macro2")]
+pub use parser::TokenParser;
 
 #[cfg(feature = "proc-macro2")]
 #[macro_use]

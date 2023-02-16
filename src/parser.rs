@@ -13,8 +13,7 @@ use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreePunct};
 ///
 /// ```
 /// # use proc_macro2::TokenStream;
-/// # use proc_macro_utils::parser::TokenParser;
-/// # use proc_macro_utils::assert_tokens;
+/// # use proc_macro_utils::{TokenParser, assert_tokens};
 /// # use quote::quote;
 /// let mut token_parser = TokenParser::from(quote! {a + b, c});
 /// assert_tokens!(token_parser.next_expression().unwrap(), { a + b });
@@ -169,8 +168,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     /// every token up to but excluding the terminator.
     ///
     /// ```
-    /// # use proc_macro_utils::parser::TokenParser;
-    /// # use proc_macro_utils::assert_tokens;
+    /// # use proc_macro_utils::{TokenParser, assert_tokens};
     /// # use proc_macro2::TokenStream;
     /// # use quote::quote;
     ///
@@ -213,8 +211,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     /// every token up to but excluding the terminator.
     ///
     /// ```
-    /// # use proc_macro_utils::parser::TokenParser;
-    /// # use proc_macro_utils::assert_tokens;
+    /// # use proc_macro_utils::{TokenParser, assert_tokens};
     /// # use proc_macro2::TokenStream;
     /// # use quote::quote;
     ///

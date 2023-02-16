@@ -2,7 +2,7 @@
 ///
 /// `lhs` needs to be an expression implementing `IntoIterator<Item=TokenTree>`
 /// e.g. [`TokenStream`](proc_macro2::TokenStream) or
-/// [`TokenParser`](crate::parser::TokenParser).
+/// [`TokenParser`](crate::TokenParser).
 /// ```
 /// # use quote::quote;
 /// # use proc_macro_utils::assert_tokens;
@@ -21,7 +21,7 @@ macro_rules! assert_tokens {
 #[doc(hidden)]
 macro_rules! assert_tokens {
     ($lhs:expr, {$($rhs:tt)*}) => {
-        let mut lhs = $crate::parser::TokenParser::from($lhs);
+        let mut lhs = $crate::TokenParser::from($lhs);
         assert_tokens!(@O lhs, "", $($rhs)*);
     };
     (@E $prefix:expr, $expected:tt, $found:tt) => {
@@ -32,7 +32,7 @@ macro_rules! assert_tokens {
     };
     (@G $lhs:ident, $fn:ident, $aggr:expr, $sym:literal, $group:tt, {$($inner:tt)*}, $($rhs:tt)*) => {
         if let Some(lhs) = $lhs.$fn() {
-            let mut lhs = $crate::parser::TokenParser::from(lhs);
+            let mut lhs = $crate::TokenParser::from(lhs);
             assert_tokens!(@O lhs, concat!($aggr, ' ', $sym), $($inner)*);
         } else if let Some(lhs) = $lhs.next() {
             assert_tokens!(@E $aggr, ($group), lhs);
