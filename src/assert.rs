@@ -19,9 +19,10 @@ macro_rules! assert_tokens {
 #[macro_export]
 #[cfg(not(doc))]
 #[doc(hidden)]
+#[allow(clippy::module_name_repetitions)]
 macro_rules! assert_tokens {
     ($lhs:expr, {$($rhs:tt)*}) => {
-        let mut lhs = $crate::TokenParser::from($lhs);
+        let mut lhs = $crate::TokenParser::new($lhs);
         assert_tokens!(@O lhs, "", $($rhs)*);
     };
     (@E $prefix:expr, $expected:tt, $found:tt) => {
