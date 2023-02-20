@@ -182,11 +182,11 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     ///
     /// Returns `None` if empty or `test(first_token) == false`
     pub fn next_while(&mut self, mut test: impl FnMut(&TokenTree) -> bool) -> Option<TokenStream> {
-        if self.peek().is_none() || !test(self.peek().unwrap()) {
+        if self.peek().is_none() || !test(self.peek().expect("was peeked")) {
             None
         } else {
             let mut token_stream = TokenStream::new();
-            token_stream.push(self.next().unwrap());
+            token_stream.push(self.next().expect("was peeked"));
             while let Some(token) = self.next_if(&mut test) {
                 token_stream.push(token);
             }
@@ -225,7 +225,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     /// type, until it reaches either:
     /// - a `;`
     /// - a `,` or `>` and all `<>` pairs are closed
-    /// - the end of the token_stream
+    /// - the end of the token stream
     ///
     /// If the token stream is empty, or starts with `,`, `>` or `;` [`None`] is
     /// returned otherwise, [`Some(TokenStream)`](TokenStream) containing
@@ -268,7 +268,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     /// expression, until it reaches either:
     /// - a `;`
     /// - a `,` outside a type
-    /// - the end of the token_stream
+    /// - the end of the token stream
     ///
     /// If the token stream is empty, or starts with `,` or `;` [`None`] is
     /// returned otherwise, [`Some(TokenStream)`](TokenStream) containing
@@ -352,6 +352,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
 ///
 /// Note that they only match the token with correct [spacing](Spacing), i.e.
 /// [`next_plus`](Self::next_plus) will match `+ =` and `+a` but not `+=`.
+// TODO figure out what the single token ones should return, TokenStream or TokenTree
 impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     punct!(
         "+", [; is_plus], next_plus;

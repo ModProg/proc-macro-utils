@@ -75,8 +75,7 @@ macro_rules! assert_tokens {
                 assert_tokens!(@E $aggr, ($token), lhs);
             }
         } else {
-            // TODO
-            panic!("expected `{}` but found EOF", stringify!($token));
+            assert_tokens!(@E $aggr, ($token));
         }
         assert_tokens!(@O $lhs, assert_tokens!(@C $aggr, $token), $($rhs)*);
     };

@@ -1,7 +1,7 @@
 //! Some useful functions on `proc_macro` and `proc_macro2` types
 //!
-//! E.g. [pushing tokens onto TokenStream](TokenStreamExt::push) and [testing
-//! for specific punctuation on TokenTree and Punct](TokenTreePunct)
+//! E.g. [pushing tokens onto `TokenStream`](TokenStreamExt::push) and [testing
+//! for specific punctuation on `TokenTree` and Punct](TokenTreePunct)
 #![warn(clippy::pedantic)]
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
