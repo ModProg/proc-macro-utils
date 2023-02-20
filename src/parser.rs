@@ -330,6 +330,89 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
 
         Some(tokens)
     }
+
+    /// Returns the next string,
+    pub fn next_string(&mut self) -> Option<String> {
+        if !self.peek()?.is_literal() {
+            return None;
+        }
+        let lit = self.peek()?.to_string();
+        if lit.starts_with('"') {
+            Some(resolve_escapes(&lit[1..lit.len() - 1]))
+        } else if lit.starts_with('r') {
+            let pounds = lit.chars().skip(1).take_while(|&c| c == '#').count();
+            Some(lit[2 + pounds..lit.len() - pounds - 1].to_owned())
+        } else {
+            None
+        }
+    }
+}
+// Implemented following https://doc.rust-lang.org/reference/tokens.html#string-literals
+#[allow(clippy::needless_continue)]
+fn resolve_escapes(mut s: &str) -> String {
+    let mut out = String::new();
+    while !s.is_empty() {
+        if s.starts_with('\\') {
+            match s.as_bytes()[1] {
+                b'x' => {
+                    out.push(
+                        char::from_u32(u32::from_str_radix(&s[2..=3], 16).expect("valid escape"))
+                            .expect("valid escape"),
+                    );
+                    s = &s[4..];
+                }
+                b'u' => {
+                    let len = s[3..].find('}').expect("valid escape");
+                    out.push(
+                        char::from_u32(u32::from_str_radix(&s[3..len], 16).expect("valid escape"))
+                            .expect("valid escape"),
+                    );
+                    s = &s[3 + len..];
+                }
+                b'n' => {
+                    out.push('\n');
+                    s = &s[2..];
+                }
+                b'r' => {
+                    out.push('\r');
+                    s = &s[2..];
+                }
+                b't' => {
+                    out.push('\t');
+                    s = &s[2..];
+                }
+                b'\\' => {
+                    out.push('\\');
+                    s = &s[2..];
+                }
+                b'0' => {
+                    out.push('\0');
+                    s = &s[2..];
+                }
+                b'\'' => {
+                    out.push('\'');
+                    s = &s[2..];
+                }
+                b'"' => {
+                    out.push('"');
+                    s = &s[2..];
+                }
+                b'\n' => {
+                    s = &s[..s[2..]
+                        .find(|c: char| !c.is_ascii_whitespace())
+                        .unwrap_or(s.len())];
+                }
+                c => unreachable!(
+                    "TokenStream string literals should only contain valid escapes, found `\\{c}`"
+                ),
+            }
+        } else {
+            let len = s.find('\\').unwrap_or(s.len());
+            out.push_str(&s[..len]);
+            s = &s[len..];
+        }
+    }
+    out
 }
 
 impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
@@ -352,7 +435,8 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
 ///
 /// Note that they only match the token with correct [spacing](Spacing), i.e.
 /// [`next_plus`](Self::next_plus) will match `+ =` and `+a` but not `+=`.
-// TODO figure out what the single token ones should return, TokenStream or TokenTree
+// TODO figure out what the single token ones should return, TokenStream or
+// TokenTree
 impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     punct!(
         "+", [; is_plus], next_plus;

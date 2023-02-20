@@ -10,16 +10,16 @@
 extern crate proc_macro;
 
 /// Parsing of simple rust structures without syn
-#[cfg(feature = "proc-macro2")]
+#[cfg(feature = "parser")]
 mod parser;
-#[cfg(feature = "proc-macro2")]
+#[cfg(feature = "parser")]
 pub use parser::TokenParser;
 
-#[cfg(feature = "proc-macro2")]
+#[cfg(feature = "parser")]
 #[macro_use]
 mod assert;
 
-#[cfg(feature = "proc-macro2")]
+#[cfg(feature = "parser")]
 #[doc(hidden)]
 pub mod __private;
 
@@ -45,9 +45,9 @@ macro_rules! trait_def {
 }
 
 macro_rules! trait_impl {
-    ($trait:ident, $type:ident, $($fn:ident, $args:tt, $($ret:ty)?, $stmts:tt),*) => {
+    ($trait:ident, $type:ident, $($fn_attr:tt, $fn:ident, $args:tt, $($ret:ty)?, $stmts:tt),*) => {
         impl $trait for $type {
-            $(fn $fn $args $(-> $ret)? $stmts)*
+            $(attr!($fn_attr, fn $fn $args $(-> $ret)? $stmts);)*
         }
     };
 }
@@ -64,12 +64,12 @@ macro_rules! impl_via_trait {
         #[cfg(feature = "proc-macro")]
         const _: () = {
             use proc_macro::*;
-            $(trait_impl!($trait, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
         };
         #[cfg(feature = "proc-macro2")]
         const _:() = {
             use proc_macro2::*;
-            $(trait_impl!($trait, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
         };
     };
     (
@@ -89,7 +89,7 @@ macro_rules! impl_via_trait {
         mod $mod {
             use proc_macro::*;
             once!($((trait_def!(($($trait_attr)* $([doc=$doc])?), $trait, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
-            $(trait_impl!($trait, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
         }
         #[cfg(feature = "proc-macro2")]
         once!(($(pub use $mod2::$trait2;)+));
@@ -97,7 +97,7 @@ macro_rules! impl_via_trait {
         mod $mod2 {
             use proc_macro2::*;
             once!($((trait_def!(($($trait_attr)*$([doc=$doc2])?), $trait2, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
-            $(trait_impl!($trait2, $type, $($fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait2, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
         }
     };
 }
@@ -109,6 +109,12 @@ impl_via_trait! {
             /// Pushes a single [`TokenTree`] onto the token stream
             fn push(&mut self, token: TokenTree) {
                 self.extend(std::iter::once(token))
+            }
+            /// Creates a [`TokenParser`] from this token stream
+            #[cfg(feature = "parser")]
+            fn parser(self) -> crate::TokenParser<proc_macro2::token_stream::IntoIter> {
+                #[allow(clippy::useless_conversion)]
+                proc_macro2::TokenStream::from(self).into()
             }
         }
     }

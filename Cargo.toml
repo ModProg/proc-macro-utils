@@ -16,9 +16,10 @@ proc-macro2 = { version = "1", optional = true }
 smallvec = { version = "1.10.0", optional = true }
 
 [features]
-default = ["proc-macro2", "proc-macro"]
+default = ["proc-macro2", "proc-macro", "parser"]
 proc-macro = []
-proc-macro2 = ["smallvec", "dep:proc-macro2"]
+parser = ["smallvec", "proc-macro2"]
+proc-macro2 = ["dep:proc-macro2"]
 
 [dev-dependencies]
 quote = "1"

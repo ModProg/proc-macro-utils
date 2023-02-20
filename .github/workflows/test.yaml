@@ -23,6 +23,7 @@ jobs:
           - --no-default-features
           - --no-default-features --features proc-macro
           - --no-default-features --features proc-macro2
+          - --no-default-features --features parser
         include:
           - rust: nightly
             cargo_flags: -Z minimal-versions
