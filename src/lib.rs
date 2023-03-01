@@ -110,7 +110,7 @@ impl_via_trait! {
             fn push(&mut self, token: TokenTree) {
                 self.extend(std::iter::once(token))
             }
-            /// Creates a [`TokenParser`] from this token stream
+            /// Creates a [`TokenParser`](crate::TokenParser) from this token stream
             #[cfg(feature = "parser")]
             fn parser(self) -> crate::TokenParser<proc_macro2::token_stream::IntoIter> {
                 #[allow(clippy::useless_conversion)]

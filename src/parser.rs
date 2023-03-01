@@ -331,7 +331,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
         Some(tokens)
     }
 
-    /// Returns the next string,
+    /// Returns the next string literal
     pub fn next_string(&mut self) -> Option<String> {
         if !self.peek()?.is_literal() {
             return None;
@@ -345,6 +345,15 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
         } else {
             None
         }
+    }
+
+    /// Returns the next boolean literal
+    pub fn next_bool(&mut self) -> Option<bool> {
+        self.next_if(|t| {
+            t.ident()
+                .map_or(false, |ident| ident == "true" || ident == "false")
+        })
+        .map(|t| matches!(t.ident(), Some(ident) if ident == "true"))
     }
 }
 // Implemented following https://doc.rust-lang.org/reference/tokens.html#string-literals
