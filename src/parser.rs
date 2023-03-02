@@ -338,8 +338,10 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
         }
         let lit = self.peek()?.to_string();
         if lit.starts_with('"') {
+            self.next();
             Some(resolve_escapes(&lit[1..lit.len() - 1]))
         } else if lit.starts_with('r') {
+            self.next();
             let pounds = lit.chars().skip(1).take_while(|&c| c == '#').count();
             Some(lit[2 + pounds..lit.len() - pounds - 1].to_owned())
         } else {
