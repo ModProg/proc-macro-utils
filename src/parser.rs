@@ -156,7 +156,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
             "{n} over max peek index of {}",
             MAX_PEEK_LEN - 1
         );
-        for _ in self.peek.len()..n {
+        for _ in self.peek.len()..=n {
             self.peek.push(self.iter.next()?);
         }
         self.peek.get(n)
@@ -528,5 +528,27 @@ mod test {
         );
         at.next();
         assert_tokens!(at.next_expression().unwrap(), { "hi" });
+    }
+
+    #[test]
+    fn combined_tokens() {
+        let mut parser = TokenParser::from(quote! {
+            -> && ..= >=
+        });
+        assert_tokens!(parser.next_r_arrow().unwrap(), { -> });
+        assert_tokens!(parser.next_and_and().unwrap(), { && });
+        assert_tokens!(parser.next_dot_dot_eq().unwrap(), { ..= });
+        assert_tokens!(parser.next_ge().unwrap(), { >= });
+    }
+
+    #[test]
+    fn peek() {
+        let mut parser = TokenParser::from(quote! {
+            0 1 2 3
+        });
+        assert_eq!(parser.peek().unwrap().to_string(), "0");
+        assert_eq!(parser.peek_n(0).unwrap().to_string(), "0");
+        assert_eq!(parser.peek_n(1).unwrap().to_string(), "1");
+        assert_eq!(parser.peek_n(2).unwrap().to_string(), "2");
     }
 }
