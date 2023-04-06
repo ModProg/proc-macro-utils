@@ -1,6 +1,6 @@
 [package]
 name = "proc-macro-utils"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 categories = ["development-tools::procedural-macro-helpers"]
 description = "low-level utilities on proc-macro and proc-macro2 types"
