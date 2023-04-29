@@ -219,6 +219,27 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
         }))
     }
 
+    /// Returns the next ident if it matches the specified keyword.
+    ///
+    /// While this is called `next_keyword` it is not restricted to rust
+    /// keywords, it can be used with any ident.
+    /// ```
+    /// # use proc_macro_utils::TokenParser;
+    /// # use quote::quote;
+    /// let mut parser = TokenParser::from(quote!( in out ));
+    /// assert_eq!(parser.next_keyword("in").unwrap().to_string(), "in");
+    /// assert!(parser.next_keyword("in").is_none());
+    /// assert_eq!(parser.next_keyword("out").unwrap().to_string(), "out");
+    /// assert!(parser.next_keyword("anything").is_none());
+    /// ```
+    pub fn next_keyword<K: ?Sized>(&mut self, keyword: &K) -> Option<Ident>
+    where
+        Ident: PartialEq<K>,
+    {
+        self.next_if(|token| matches!(token.ident(), Some(ident) if ident == keyword))
+            .map(|token| token.into_ident().expect("is ident"))
+    }
+
     /// "Parses" a type expression
     ///
     /// This just means it collects all the tokens that should belong to the
@@ -550,5 +571,18 @@ mod test {
         assert_eq!(parser.peek_n(0).unwrap().to_string(), "0");
         assert_eq!(parser.peek_n(1).unwrap().to_string(), "1");
         assert_eq!(parser.peek_n(2).unwrap().to_string(), "2");
+    }
+
+    #[test]
+    fn keyword() {
+        let mut parser = TokenParser::from(quote! {
+            in out and or
+        });
+        assert_eq!(parser.next_keyword("in").unwrap().to_string(), "in");
+        assert_eq!(parser.next_keyword("out").unwrap().to_string(), "out");
+        assert!(parser.next_keyword("or").is_none());
+        assert_eq!(parser.next_keyword("and").unwrap().to_string(), "and");
+        assert_eq!(parser.next_keyword("or").unwrap().to_string(), "or");
+        assert!(parser.next_keyword("or").is_none());
     }
 }
