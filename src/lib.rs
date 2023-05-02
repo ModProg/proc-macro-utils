@@ -4,6 +4,7 @@
 //! for specific punctuation on `TokenTree` and Punct](TokenTreePunct)
 #![warn(clippy::pedantic, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![deny(rustdoc::all)]
 
 #[cfg(feature = "proc-macro")]
 extern crate proc_macro;

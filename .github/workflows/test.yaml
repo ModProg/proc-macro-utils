@@ -46,4 +46,4 @@ jobs:
       - name: Doc Test
         run: cargo hack test --feature-powerset --doc --no-fail-fast --workspace
       - name: Build Docs
-        run: cargo hack doc --feature-powerset --workspace --no-deps
+        run: cargo doc --all-features --workspace 
