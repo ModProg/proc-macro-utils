@@ -6,14 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- `quote::ToTokens` implementation for `TokenParser` (`quote` is a new default feature)
-- `peek_{token}` and `peek_n_{token}` to `TokenParser`
+- `quote::ToTokens` implementation for `TokenParser` (`quote` is a new default feature).
+- `peek_{token}` and `peek_n_{token}` to `TokenParser`.
 
 ### Changed
-- **Breaking Change** added const generic buffer size to `TokenParser`
-- **Breaking Change** `Peeker::peek` takes `&[TokenTree]` instead of `TokenParser`
-- `TokenParser` peeking supports `n` greater than stack buffer, allowing spilling to heap
-- increased default `TokenParser` peek buffer to `6`
+- **Breaking Change** Added const generic buffer size to `TokenParser`.
+- **Breaking Change** `Peeker::peek` takes `&[TokenTree]` instead of `TokenParser`.
+- `TokenParser` peeking supports `n` greater than stack buffer, allowing spilling to heap.
+- Increased default `TokenParser` peek buffer to `6`.
+- Marked parser functions as must_use.
 
 ## [0.6.0] - 2023-04-29
 - `TokenParser::next_keyword(v)`

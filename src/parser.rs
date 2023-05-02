@@ -17,12 +17,14 @@ pub trait Peeker {
     /// # Panics
     ///
     /// Implementations can panic if `tokens.len() < Self::LENGTH`.
+    #[must_use]
     fn peek(self, tokens: &[TokenTree]) -> bool;
 }
 
 impl<T: FnOnce(&TokenTree) -> bool> Peeker for T {
     const LENGTH: usize = 1;
 
+    #[must_use]
     fn peek(self, parser: &[TokenTree]) -> bool {
         self(&parser[0])
     }
@@ -84,6 +86,7 @@ impl_peeker![
 /// additionally.
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
+#[must_use]
 pub struct TokenParser<
     I: Iterator<Item = TokenTree> = token_stream::IntoIter,
     const PEEKER_LEN: usize = 6,
@@ -135,6 +138,7 @@ impl<I, const PEEKER_LEN: usize> From<TokenParser<I, PEEKER_LEN>> for TokenStrea
 where
     I: Iterator<Item = TokenTree>,
 {
+    #[must_use]
     fn from(value: TokenParser<I, PEEKER_LEN>) -> Self {
         value.iter.collect()
     }
@@ -146,6 +150,7 @@ where
 {
     type Item = TokenTree;
 
+    #[must_use]
     fn next(&mut self) -> Option<Self::Item> {
         if self.peek.is_empty() {
             self.iter.next()
@@ -164,10 +169,12 @@ where
         tokens.extend(self.clone());
     }
 
+    #[must_use]
     fn to_token_stream(&self) -> TokenStream {
         self.clone().collect()
     }
 
+    #[must_use]
     fn into_token_stream(self) -> TokenStream
     where
         Self: Sized,
@@ -179,14 +186,17 @@ where
 macro_rules! punct {
     ($($punct:literal, [$($tests:ident),*; $last:ident], $peek:ident, $peek_n:ident, $name:ident);*$(;)?) => {
         $(#[doc = concat!("Returns the next token if it is a `", $punct ,"`")]
+        #[must_use]
         pub fn $name(&mut self) -> Option<TokenStream> {
             self.next_if_each(($(|t:&TokenTree|t.is_joint() && t.$tests(),)* |t:&TokenTree| t.is_alone() && t.$last()))
         })*
         $(#[doc = concat!("Returns the next token if it is a `", $punct ,"` without advancing the parser")]
+        #[must_use]
         pub fn $peek(&mut self) -> Option<TokenStream> {
             self.$peek_n(0)
         })*
         $(#[doc = concat!("Returns the `n`th token if it is a `", $punct ,"` without advancing the parser")]
+        #[must_use]
         pub fn $peek_n(&mut self, n:usize) -> Option<TokenStream> {
             self.peek_n_if_each(n, ($(|t:&TokenTree|t.is_joint() && t.$tests(),)* |t:&TokenTree| t.is_alone() && t.$last()))
         })*
@@ -199,16 +209,19 @@ macro_rules! punct {
 macro_rules! token_tree {
     ($($a:literal, $test:ident, $peek_as:ident, $as:ident, $peek:ident, $peek_n:ident, $name:ident, $token:ident);*$(;)?) => {
         $(#[doc = concat!("Returns the next token if it is ", $a, " [`", stringify!($token) ,"`].")]
+        #[must_use]
         pub fn $name(&mut self) -> Option<$token> {
             self.$peek().is_some().then(|| self.next().expect("token should be present").$as().expect(concat!("should be ", stringify!($token))))
         })*
 
         $(#[doc = concat!("Returns the next token if it is ", $a, " [`", stringify!($token) ,"`] without advancing the parser.")]
+        #[must_use]
         pub fn $peek(&mut self) -> Option<&$token> {
             self.$peek_n(0)
         })*
 
         $(#[doc = concat!("Returns the `n`th token if it is ", $a, " [`", stringify!($token) ,"`] without advancing the parser.")]
+        #[must_use]
         pub fn $peek_n(&mut self, n: usize) -> Option<&$token> {
             self.peek_n(n).and_then(TokenTree::$peek_as)
         })*
@@ -218,6 +231,7 @@ macro_rules! token_tree {
 macro_rules! delimited {
     ($($test:ident, $peek:ident, $peek_n:ident, $name:ident, $doc:literal;)*) => {
         $(#[doc = concat!("Returns the next token if it is a ", $doc ," group.")]
+        #[must_use]
         pub fn $name(&mut self) -> Option<TokenStream> {
             self.$peek().map(|stream| {
                 self.next().unwrap();
@@ -225,10 +239,12 @@ macro_rules! delimited {
             })
         })*
         $(#[doc = concat!("Returns the next token if it is a", $doc ," group, without advancing the parser.")]
+        #[must_use]
         pub fn $peek(&mut self) -> Option<TokenStream> {
             self.$peek_n(0)
         })*
         $(#[doc = concat!("Returns the `n`th token if it is a ", $doc ," group, without advancing the parser.")]
+        #[must_use]
         pub fn $peek_n(&mut self, n: usize) -> Option<TokenStream> {
             self.peek_n(n).and_then(|token|
                 token.$test().then(|| token.group().unwrap().stream()))
@@ -242,11 +258,13 @@ where
     I: Iterator<Item = TokenTree>,
 {
     /// Checks if there are remaining tokens
+    #[must_use]
     pub fn is_empty(&mut self) -> bool {
         self.peek().is_none()
     }
 
     /// Peeks the next token without advancing the parser
+    #[must_use]
     pub fn peek(&mut self) -> Option<&TokenTree> {
         if self.peek.is_empty() {
             self.peek.push(self.iter.next()?);
@@ -255,6 +273,7 @@ where
     }
 
     /// Peeks the `n`th token without advancing the parser
+    #[must_use]
     pub fn peek_n(&mut self, n: usize) -> Option<&TokenTree> {
         for _ in self.peek.len()..=n {
             self.peek.push(self.iter.next()?);
@@ -264,15 +283,19 @@ where
 
     /// Returns the next token if it fulfills the condition otherwise returns
     /// None and doesn't advance the parser
+    #[must_use]
     pub fn next_if(&mut self, test: impl FnOnce(&TokenTree) -> bool) -> Option<TokenTree> {
         test(self.peek()?).then(|| self.next().expect("was peeked"))
     }
 
     /// Returns the next tokens if they fulfill the conditions
     /// otherwise returns None and doesn't advance the parser
+    #[must_use]
     pub fn next_if_each<P: Peeker>(&mut self, tests: P) -> Option<TokenStream> {
         // Ensure peek is filled;
-        self.peek_n(P::LENGTH);
+        if PEEKER_LEN > 0 {
+            self.peek_n(P::LENGTH - 1)?;
+        }
         tests
             .peek(&self.peek[..P::LENGTH])
             .then(|| self.peek.drain(0..P::LENGTH).collect())
@@ -280,16 +303,20 @@ where
 
     /// Returns the next tokens if they fulfill the conditions
     /// otherwise returns None, without advancing the parser
+    #[must_use]
     pub fn peek_if_each<P: Peeker>(&mut self, tests: P) -> Option<TokenStream> {
         // Ensure peek is filled;
         self.peek_n_if_each(0, tests)
     }
 
-    /// Returns the next tokens from `n` (up to 3) if they fulfill the
+    /// Returns the next tokens from `n` if they fulfill the
     /// conditions otherwise returns None, without advancing the parser
+    #[must_use]
     pub fn peek_n_if_each<P: Peeker>(&mut self, n: usize, tests: P) -> Option<TokenStream> {
         // Ensure peek is filled;
-        self.peek_n(P::LENGTH + n);
+        if PEEKER_LEN > 0 {
+            self.peek_n(P::LENGTH + n - 1)?;
+        }
         let peeked = &self.peek[n..P::LENGTH + n];
         tests.peek(peeked).then(|| peeked.iter().cloned().collect())
     }
@@ -297,6 +324,7 @@ where
     /// Returns all tokens while `test` evaluates to true.
     ///
     /// Returns `None` if empty or `test(first_token) == false`
+    #[must_use]
     pub fn next_while(&mut self, mut test: impl FnMut(&TokenTree) -> bool) -> Option<TokenStream> {
         if self.peek().is_none() || !test(self.peek().expect("was peeked")) {
             None
@@ -313,6 +341,7 @@ where
     /// Returns all tokens while `test` evaluates to false.
     ///
     /// Returns `None` if empty or `test(first_token) == true`.
+    #[must_use]
     pub fn next_until(&mut self, mut test: impl FnMut(&TokenTree) -> bool) -> Option<TokenStream> {
         self.next_while(|token| !test(token))
     }
@@ -323,19 +352,21 @@ where
     I: Iterator<Item = TokenTree>,
 {
     /// Collects remaining tokens back into a [`TokenStream`]
+    #[must_use]
     pub fn into_token_stream(self) -> TokenStream {
         self.into()
     }
 
     /// Returns the next group of punctuation with [`Punct::spacing`]
     /// [`Spacing::Joint`]
+    #[must_use]
     pub fn next_punctuation_group(&mut self) -> Option<TokenStream> {
         let mut joined = true;
-        dbg!(self.next_while(move |token| {
-            let ret = joined && dbg!(token.is_punct());
+        self.next_while(move |token| {
+            let ret = joined && token.is_punct();
             joined = token.is_joint();
             ret
-        }))
+        })
     }
 
     /// Returns the next ident if it matches the specified keyword.
@@ -351,6 +382,7 @@ where
     /// assert_eq!(parser.next_keyword("out").unwrap().to_string(), "out");
     /// assert!(parser.next_keyword("anything").is_none());
     /// ```
+    #[must_use]
     pub fn next_keyword<K: ?Sized>(&mut self, keyword: &K) -> Option<Ident>
     where
         Ident: PartialEq<K>,
@@ -381,6 +413,7 @@ where
     /// assert!(tokens.next_type().is_none());
     /// assert_tokens!(tokens, { , remainder });
     /// ```
+    #[must_use]
     pub fn next_type(&mut self) -> Option<TokenStream> {
         let Some(first) = self.peek() else { return None; };
         if first.is_comma() || first.is_semi() {
@@ -424,6 +457,7 @@ where
     /// assert!(tokens.next_expression().is_none());
     /// assert_tokens!(tokens, { , next_token });
     /// ```
+    #[must_use]
     pub fn next_expression(&mut self) -> Option<TokenStream> {
         if self.peek().is_none()
             || matches!(self.peek(), Some(token) if token.is_comma() || token.is_semi())
@@ -472,6 +506,7 @@ where
     }
 
     /// Returns the next string literal
+    #[must_use]
     pub fn next_string(&mut self) -> Option<String> {
         if !self.peek()?.is_literal() {
             return None;
@@ -490,6 +525,7 @@ where
     }
 
     /// Returns the next boolean literal
+    #[must_use]
     pub fn next_bool(&mut self) -> Option<bool> {
         self.next_if(|t| {
             t.ident()
