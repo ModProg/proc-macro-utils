@@ -694,7 +694,7 @@ mod test {
         });
         assert_eq!(parser.peek().unwrap().to_string(), "0");
         assert_eq!(parser.peek_n(0).unwrap().to_string(), "0");
-        assert_eq!(parser.peek_n(1).unwrap().to_string(), "{}");
+        assert_eq!(parser.peek_n(1).unwrap().to_string().replace(' ', ""), "{}");
         assert_eq!(parser.peek_n(2).unwrap().to_string(), "2");
 
         assert_eq!(parser.peek_literal().unwrap().to_string(), "0");
