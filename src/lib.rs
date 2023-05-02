@@ -2,8 +2,7 @@
 //!
 //! E.g. [pushing tokens onto `TokenStream`](TokenStreamExt::push) and [testing
 //! for specific punctuation on `TokenTree` and Punct](TokenTreePunct)
-#![warn(clippy::pedantic)]
-#![deny(missing_docs)]
+#![warn(clippy::pedantic, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[cfg(feature = "proc-macro")]
@@ -36,18 +35,18 @@ macro_rules! attr {
 }
 
 macro_rules! trait_def {
-    ($item_attr:tt, $trait:ident, $($fn_attr:tt, $fn:ident, $args:tt, $($ret:ty)?),*) => {
+    ($item_attr:tt, $trait:ident, $($fn_attr:tt, $fn:ident, $({$($gen:tt)*})?, $args:tt, $($ret:ty)?),*) => {
         attr!($item_attr,
         pub trait $trait {
-            $(attr!($fn_attr, fn $fn $args $(-> $ret)?;);)*
+            $(attr!($fn_attr, fn $fn $($($gen)*)? $args $(-> $ret)?;);)*
         });
     };
 }
 
 macro_rules! trait_impl {
-    ($trait:ident, $type:ident, $($fn_attr:tt, $fn:ident, $args:tt, $($ret:ty)?, $stmts:tt),*) => {
+    ($trait:ident, $type:ident, $($fn_attr:tt, $fn:ident, $({$($gen:tt)*})?, $args:tt, $($ret:ty)?, $stmts:tt),*) => {
         impl $trait for $type {
-            $(attr!($fn_attr, fn $fn $args $(-> $ret)? $stmts);)*
+            $(attr!($fn_attr, fn $fn $($($gen)*)? $args $(-> $ret)? $stmts);)*
         }
     };
 }
@@ -60,16 +59,16 @@ macro_rules! impl_via_trait {
             fn $fn:ident $args:tt $(-> $ret:ty)? { $($stmts:tt)* })*
         }
     )+) => {
-        once!($((trait_def!(($($trait_attr)*), $trait, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
+        once!($((trait_def!(($($trait_attr)*), $trait, $(($($fn_attr)*), $fn,, $args, $($ret)?),*);))+);
         #[cfg(feature = "proc-macro")]
         const _: () = {
             use proc_macro::*;
-            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn,, $args, $($ret)?, {$($stmts)*}),*);)+
         };
         #[cfg(feature = "proc-macro2")]
         const _:() = {
             use proc_macro2::*;
-            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn,, $args, $($ret)?, {$($stmts)*}),*);)+
         };
     };
     (
@@ -78,7 +77,7 @@ macro_rules! impl_via_trait {
                 $(#$trait_attr:tt)*
                 impl $trait:ident$($doc:literal)?, $trait2:ident$($doc2:literal)?  for $type:ident {
                     $($(#$fn_attr:tt)*
-                    fn $fn:ident $args:tt $(-> $ret:ty)? { $($stmts:tt)* })*
+                    fn $fn:ident $({$($gen:tt)*})? ($($args:tt)*) $(-> $ret:ty)? { $($stmts:tt)* })*
                 }
             )+
         }
@@ -88,16 +87,16 @@ macro_rules! impl_via_trait {
         #[cfg(feature = "proc-macro")]
         mod $mod {
             use proc_macro::*;
-            once!($((trait_def!(($($trait_attr)* $([doc=$doc])?), $trait, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
-            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            once!($((trait_def!(($($trait_attr)* $([doc=$doc])?), $trait, $(($($fn_attr)*), $fn, $({$($gen)*})?, ($($args)*), $($ret)?),*);))+);
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $({$($gen)*})?, ($($args)*), $($ret)?, {$($stmts)*}),*);)+
         }
         #[cfg(feature = "proc-macro2")]
         once!(($(pub use $mod2::$trait2;)+));
         #[cfg(feature = "proc-macro2")]
         mod $mod2 {
             use proc_macro2::*;
-            once!($((trait_def!(($($trait_attr)*$([doc=$doc2])?), $trait2, $(($($fn_attr)*), $fn, $args, $($ret)?),*);))+);
-            $(trait_impl!($trait2, $type, $(($($fn_attr)*), $fn, $args, $($ret)?, {$($stmts)*}),*);)+
+            once!($((trait_def!(($($trait_attr)*$([doc=$doc2])?), $trait2, $(($($fn_attr)*), $fn, $({$($gen)*})?, ($($args)*), $($ret)?),*);))+);
+            $(trait_impl!($trait2, $type, $(($($fn_attr)*), $fn, $({$($gen)*})?, ($($args)*), $($ret)?, {$($stmts)*}),*);)+
         }
     };
 }
@@ -106,13 +105,22 @@ impl_via_trait! {
     mod token_stream_ext, token_stream2_ext {
         /// Generic extensions for
         impl TokenStreamExt "[`proc_macro::TokenStream`]", TokenStream2Ext "[`proc_macro2::TokenStream`]" for TokenStream {
-            /// Pushes a single [`TokenTree`] onto the token stream
+            /// Pushes a single [`TokenTree`] onto the token stream.
             fn push(&mut self, token: TokenTree) {
                 self.extend(std::iter::once(token))
             }
-            /// Creates a [`TokenParser`](crate::TokenParser) from this token stream
+            /// Creates a [`TokenParser`](crate::TokenParser) from this token stream.
             #[cfg(feature = "parser")]
             fn parser(self) -> crate::TokenParser<proc_macro2::token_stream::IntoIter> {
+                #[allow(clippy::useless_conversion)]
+                proc_macro2::TokenStream::from(self).into()
+            }
+
+            /// Creates a [`TokenParser`](crate::TokenParser) from this token stream.
+            ///
+            /// Allows to specify the length of the [peeker buffer](crate::TokenParser#peeking).
+            #[cfg(feature = "parser")]
+            fn parser_generic{<const PEEKER_LEN: usize>}(self) -> crate::TokenParser<proc_macro2::token_stream::IntoIter, PEEKER_LEN> {
                 #[allow(clippy::useless_conversion)]
                 proc_macro2::TokenStream::from(self).into()
             }

@@ -14,13 +14,13 @@ include = ["src/**/*", "LICENSE-*", "README.md", "CHANGELOG.md"]
 
 [dependencies]
 proc-macro2 = { version = "1", optional = true }
-smallvec = { version = "1", optional = true }
+quote = { version = "1", optional = true }
+smallvec = { version = "1.4", optional = true, features = ["const_generics"] }
 
 [features]
-default = ["proc-macro2", "proc-macro", "parser"]
+default = ["proc-macro2", "proc-macro", "parser", "quote"]
 proc-macro = []
 parser = ["smallvec", "proc-macro2"]
-proc-macro2 = ["dep:proc-macro2"]
 
 [dev-dependencies]
 quote = "1"

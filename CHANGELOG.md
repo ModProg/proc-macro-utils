@@ -4,23 +4,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- ## [Unreleased] -->
+## [Unreleased]
+### Added
+- `quote::ToTokens` implementation for `TokenParser` (`quote` is a new default feature)
+- `peek_{token}` and `peek_n_{token}` to `TokenParser`
+
+### Changed
+- **Breaking Change** added const generic buffer size to `TokenParser`
+- **Breaking Change** `Peeker::peek` takes `&[TokenTree]` instead of `TokenParser`
+- `TokenParser` peeking supports `n` greater than stack buffer, allowing spilling to heap
+- increased default `TokenParser` peek buffer to `6`
 
 ## [0.6.0] - 2023-04-29
-- `Parser::next_keyword(v)`
+- `TokenParser::next_keyword(v)`
 
 ## [0.5.2] - 2023-04-06
 ### Fixed
-- `Parser::peek_n()` always returned `None`
-- `Parser::next_{token}` did not work correctly because of `peek_n`
+- `TokenParser::peek_n()` always returned `None`
+- `TokenParser::next_{token}` did not work correctly because of `peek_n`
 
 ## [0.5.1] - 2023-03-02
 ### Fixed
-- `Parser::next_string()` did not consume token
+- `TokenParser::next_string()` did not consume token
 
 ## [0.5.0] - 2023-03-01
 ### Added
-- Parser for parsing simple rust structures
+- `TokenParser` for parsing simple rust structures
 - `assert_tokens!` macro
 - `TokenTreeExt::into_<token>()` functions 
 - `Delimited` trait for accessing `TokenTree::Group`

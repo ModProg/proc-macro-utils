@@ -22,7 +22,7 @@ macro_rules! assert_tokens {
 #[allow(clippy::module_name_repetitions)]
 macro_rules! assert_tokens {
     ($lhs:expr, {$($rhs:tt)*}) => {
-        let mut lhs = $crate::TokenParser::new($lhs);
+        let mut lhs = $crate::TokenParser::new_generic::<3, _, _>($lhs);
         assert_tokens!(@O lhs, "", $($rhs)*);
     };
     (@E $prefix:expr, $expected:tt, $found:tt) => {
@@ -33,7 +33,7 @@ macro_rules! assert_tokens {
     };
     (@G $lhs:ident, $fn:ident, $aggr:expr, $sym:literal, $group:tt, {$($inner:tt)*}, $($rhs:tt)*) => {
         if let Some(lhs) = $lhs.$fn() {
-            let mut lhs = $crate::TokenParser::from(lhs);
+            let mut lhs = $crate::TokenParser::<_, 3>::from(lhs);
             assert_tokens!(@O lhs, concat!($aggr, ' ', $sym), $($inner)*);
         } else if let Some(lhs) = $lhs.next() {
             assert_tokens!(@E $aggr, ($group), lhs);

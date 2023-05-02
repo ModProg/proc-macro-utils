@@ -1,43 +1,52 @@
 #[cfg(doc)]
 use proc_macro2::Spacing;
-use proc_macro2::{Group, Ident, Literal, Punct, TokenStream, TokenTree};
+use proc_macro2::{token_stream, Group, Ident, Literal, Punct, TokenStream, TokenTree};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreePunct};
 
 // TODO move implementation in a trait implemented on both
 // Peekable<token_stream::IntoIter>s
-pub trait Peeker<I: Iterator<Item = TokenTree>> {
+/// Trait that allows to peek a constant number of tokens.
+pub trait Peeker {
+    /// Number of tokens this peeker checks.
     const LENGTH: usize;
-    fn peek(self, parser: &mut TokenParser<I>) -> bool;
+
+    /// Test if the tokens match.
+    ///
+    /// # Panics
+    ///
+    /// Implementations can panic if `tokens.len() < Self::LENGTH`.
+    fn peek(self, tokens: &[TokenTree]) -> bool;
 }
 
-impl<T: FnOnce(&TokenTree) -> bool, I: Iterator<Item = TokenTree>> Peeker<I> for T {
+impl<T: FnOnce(&TokenTree) -> bool> Peeker for T {
     const LENGTH: usize = 1;
 
-    fn peek(self, parser: &mut TokenParser<I>) -> bool {
-        parser.peek().map_or(false, self)
+    fn peek(self, parser: &[TokenTree]) -> bool {
+        self(&parser[0])
     }
 }
 
 macro_rules! impl_peeker {
     ($(($($T:ident $idx:tt),+$(,)?),$len:literal;)*) => {
-        $(impl<$($T: FnOnce(&TokenTree) -> bool),+, I: Iterator<Item = TokenTree>> Peeker<I> for ($($T,)+) {
-            const LENGTH: usize = $len;
-            fn peek(self, parser: &mut TokenParser<I>) -> bool {
-                $(parser.peek_n($idx).map_or(false, self.$idx))&&+
+        $(
+            impl<$($T: FnOnce(&TokenTree) -> bool),+> Peeker for ($($T,)+) {
+                const LENGTH: usize = $len;
+                fn peek(self, parser: &[TokenTree]) -> bool {
+                    $(self.$idx(&parser[$idx]))&&+
+                }
             }
-        })*
+        )*
     };
 }
 
 impl_peeker![
-    (T1 0,),1;
-    (T1 0, T2 1),2;
-    (T1 0, T2 1, T3 2),3;
+    (T1 0,), 1;
+    (T1 0, T2 1), 2;
+    (T1 0, T2 1, T3 2), 3;
 ];
 
-const MAX_PEEK_LEN: usize = 3;
 /// Wrapper for [`TokenStream::into_iter`] allowing not only to iterate on
 /// tokens but also to parse simple structures like types or expressions, though
 /// it does not make any claims about their correctness.
@@ -46,48 +55,95 @@ const MAX_PEEK_LEN: usize = 3;
 /// # use proc_macro2::TokenStream;
 /// # use proc_macro_utils::{TokenParser, assert_tokens};
 /// # use quote::quote;
-/// let mut token_parser = TokenParser::from(quote! {a + b, c});
+/// let mut token_parser = TokenParser::new(quote! {a + b, c});
 /// assert_tokens!(token_parser.next_expression().unwrap(), { a + b });
 /// ```
+///
+/// # Construction
+///
+/// In most cases use [`new()`](TokenParser::new) to avoid specifying the
+/// generics. To change the on-stack size of the peek-buffer use
+/// [`new_generic()`](TokenParser::new_generic) or
+/// [`From::from`](#impl-From<T>-for-TokenParser<I,+PEEKER_LEN>).
+///
+/// # Peeking
+///
+/// The `TokenParser` allows peeking an arbitrary amount of tokens using
+/// [`peek_n()`](Self::peek_n) and the token specific variants. This uses a
+/// [`SmallVec`] with its capacity specified via `PEEKER_LEN` (default is 6).
+/// This means peeking up to `6` tokens ahead happens without heap allocation.
+/// Token groups can need up to `3` tokens of additional space e.g.
+/// [`peek_n_dot_dot_eq()`](Self::peek_n_dot_dot_eq) can, with the default
+/// allocation free be called with up to `3`, and
+/// [`peek_n_plus_eq()`](Self::peek_n_plus_eq) up to `4`.
+///
+/// **Warning**: Setting `PEEKER_LEN = 0` means even
+/// [`is_empty()`](Self::is_empty) and [`peek()`](Self::peek) allocate, and a
+/// value below `3` will make some of the
+/// [`peek_{punctuation}`](#impl-TokenParser<I,+PEEKER_LEN>-3) allocate
+/// additionally.
 #[allow(clippy::module_name_repetitions)]
-pub struct TokenParser<T: Iterator<Item = TokenTree>> {
-    peek: SmallVec<[TokenTree; MAX_PEEK_LEN]>,
-    iter: T,
+#[derive(Clone)]
+pub struct TokenParser<
+    I: Iterator<Item = TokenTree> = token_stream::IntoIter,
+    const PEEKER_LEN: usize = 6,
+> {
+    peek: SmallVec<[TokenTree; PEEKER_LEN]>,
+    iter: I,
 }
 
-impl<I> TokenParser<I>
-where
-    I: Iterator<Item = TokenTree>,
-{
+impl TokenParser {
     /// Creates a new [`TokenParser`] from a [`TokenTree`] iterator.
-    pub fn new<T: IntoIterator<Item = TokenTree, IntoIter = I>>(value: T) -> Self {
-        Self {
+    ///
+    /// This sets the default length for the peeker buffer. Use
+    /// [`new_generic()`](Self::new_generic) to change it.
+    pub fn new<T, I>(value: T) -> TokenParser<I, 6>
+    where
+        T: IntoIterator<Item = TokenTree, IntoIter = I>,
+        I: Iterator<Item = TokenTree>,
+    {
+        TokenParser::new_generic(value)
+    }
+
+    /// Creates a new [`TokenParser`] from a [`TokenTree`] iterator, allowing
+    /// to specify the size of the peeker buffer.
+    ///
+    /// See [Peeking](#Peeking) for implications.
+    pub fn new_generic<const PEEKER_LEN: usize, T, I>(value: T) -> TokenParser<I, PEEKER_LEN>
+    where
+        T: IntoIterator<Item = TokenTree, IntoIter = I>,
+        I: Iterator<Item = TokenTree>,
+    {
+        TokenParser {
             peek: smallvec![],
             iter: value.into_iter(),
         }
     }
 }
 
-impl<T, I> From<T> for TokenParser<I>
+impl<T, I, const PEEKER_LEN: usize> From<T> for TokenParser<I, PEEKER_LEN>
 where
     T: IntoIterator<Item = TokenTree, IntoIter = I>,
     I: Iterator<Item = TokenTree>,
 {
     fn from(value: T) -> Self {
-        Self {
-            peek: smallvec![],
-            iter: value.into_iter(),
-        }
+        TokenParser::new_generic(value)
     }
 }
 
-impl<I: Iterator<Item = TokenTree>> From<TokenParser<I>> for TokenStream {
-    fn from(value: TokenParser<I>) -> Self {
+impl<I, const PEEKER_LEN: usize> From<TokenParser<I, PEEKER_LEN>> for TokenStream
+where
+    I: Iterator<Item = TokenTree>,
+{
+    fn from(value: TokenParser<I, PEEKER_LEN>) -> Self {
         value.iter.collect()
     }
 }
 
-impl<T: Iterator<Item = TokenTree>> Iterator for TokenParser<T> {
+impl<I, const PEEKER_LEN: usize> Iterator for TokenParser<I, PEEKER_LEN>
+where
+    I: Iterator<Item = TokenTree>,
+{
     type Item = TokenTree;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -99,11 +155,40 @@ impl<T: Iterator<Item = TokenTree>> Iterator for TokenParser<T> {
     }
 }
 
+#[cfg(feature = "quote")]
+impl<I, const PEEKER_LEN: usize> quote::ToTokens for TokenParser<I, PEEKER_LEN>
+where
+    I: Clone + Iterator<Item = TokenTree>,
+{
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(self.clone());
+    }
+
+    fn to_token_stream(&self) -> TokenStream {
+        self.clone().collect()
+    }
+
+    fn into_token_stream(self) -> TokenStream
+    where
+        Self: Sized,
+    {
+        self.collect()
+    }
+}
+
 macro_rules! punct {
-    ($($punct:literal, [$($tests:ident),*; $last:ident], $name:ident);*$(;)?) => {
+    ($($punct:literal, [$($tests:ident),*; $last:ident], $peek:ident, $peek_n:ident, $name:ident);*$(;)?) => {
         $(#[doc = concat!("Returns the next token if it is a `", $punct ,"`")]
         pub fn $name(&mut self) -> Option<TokenStream> {
             self.next_if_each(($(|t:&TokenTree|t.is_joint() && t.$tests(),)* |t:&TokenTree| t.is_alone() && t.$last()))
+        })*
+        $(#[doc = concat!("Returns the next token if it is a `", $punct ,"` without advancing the parser")]
+        pub fn $peek(&mut self) -> Option<TokenStream> {
+            self.$peek_n(0)
+        })*
+        $(#[doc = concat!("Returns the `n`th token if it is a `", $punct ,"` without advancing the parser")]
+        pub fn $peek_n(&mut self, n:usize) -> Option<TokenStream> {
+            self.peek_n_if_each(n, ($(|t:&TokenTree|t.is_joint() && t.$tests(),)* |t:&TokenTree| t.is_alone() && t.$last()))
         })*
     };
     ([$test:ident $($tests:ident)*]) => {
@@ -112,26 +197,50 @@ macro_rules! punct {
 }
 
 macro_rules! token_tree {
-    ($($a:literal, $test:ident, $as:ident, $name:ident, $token:ident);*$(;)?) => {
-        $(#[doc = concat!("Returns the next token if it is ", $a, " [`", stringify!($token) ,"`]")]
+    ($($a:literal, $test:ident, $peek_as:ident, $as:ident, $peek:ident, $peek_n:ident, $name:ident, $token:ident);*$(;)?) => {
+        $(#[doc = concat!("Returns the next token if it is ", $a, " [`", stringify!($token) ,"`].")]
         pub fn $name(&mut self) -> Option<$token> {
-            matches!(self.peek(), Some(token) if token.$test()).then(|| self.next().expect("token should be present").$as().expect(concat!("should be ", stringify!($token))))
+            self.$peek().is_some().then(|| self.next().expect("token should be present").$as().expect(concat!("should be ", stringify!($token))))
+        })*
+
+        $(#[doc = concat!("Returns the next token if it is ", $a, " [`", stringify!($token) ,"`] without advancing the parser.")]
+        pub fn $peek(&mut self) -> Option<&$token> {
+            self.$peek_n(0)
+        })*
+
+        $(#[doc = concat!("Returns the `n`th token if it is ", $a, " [`", stringify!($token) ,"`] without advancing the parser.")]
+        pub fn $peek_n(&mut self, n: usize) -> Option<&$token> {
+            self.peek_n(n).and_then(TokenTree::$peek_as)
         })*
     };
 }
 
 macro_rules! delimited {
-    ($($test:ident, $name:ident, $doc:literal;)*) => {
-        $(#[doc = concat!("Returns the next ", $doc ," group")]
+    ($($test:ident, $peek:ident, $peek_n:ident, $name:ident, $doc:literal;)*) => {
+        $(#[doc = concat!("Returns the next token if it is a ", $doc ," group.")]
         pub fn $name(&mut self) -> Option<TokenStream> {
-            matches!(self.peek(), Some(token) if token.$test())
-                .then(|| self.next_group().expect("should be group").stream())
+            self.$peek().map(|stream| {
+                self.next().unwrap();
+                stream
+            })
+        })*
+        $(#[doc = concat!("Returns the next token if it is a", $doc ," group, without advancing the parser.")]
+        pub fn $peek(&mut self) -> Option<TokenStream> {
+            self.$peek_n(0)
+        })*
+        $(#[doc = concat!("Returns the `n`th token if it is a ", $doc ," group, without advancing the parser.")]
+        pub fn $peek_n(&mut self, n: usize) -> Option<TokenStream> {
+            self.peek_n(n).and_then(|token|
+                token.$test().then(|| token.group().unwrap().stream()))
         })*
     };
 }
 
 /// Some Iterator utilities
-impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
+impl<I, const PEEKER_LEN: usize> TokenParser<I, PEEKER_LEN>
+where
+    I: Iterator<Item = TokenTree>,
+{
     /// Checks if there are remaining tokens
     pub fn is_empty(&mut self) -> bool {
         self.peek().is_none()
@@ -145,17 +254,8 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
         self.peek.first()
     }
 
-    /// Peeks the next token without advancing the parser
-    ///
-    /// # Panics
-    ///
-    /// Will panic if `n >= 3`.
+    /// Peeks the `n`th token without advancing the parser
     pub fn peek_n(&mut self, n: usize) -> Option<&TokenTree> {
-        assert!(
-            (0..MAX_PEEK_LEN).contains(&n),
-            "{n} over max peek index of {}",
-            MAX_PEEK_LEN - 1
-        );
         for _ in self.peek.len()..=n {
             self.peek.push(self.iter.next()?);
         }
@@ -168,14 +268,30 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
         test(self.peek()?).then(|| self.next().expect("was peeked"))
     }
 
-    /// Returns the next tokens (up to 3) if they fulfill the conditions
+    /// Returns the next tokens if they fulfill the conditions
     /// otherwise returns None and doesn't advance the parser
-    pub fn next_if_each<P: Peeker<T>>(&mut self, tests: P) -> Option<TokenStream> {
-        tests.peek(self).then(|| {
-            // Each peeker peeks at least as many elements as its LENGTH therfore they are
-            // all in the peek
-            self.peek.drain(0..P::LENGTH).collect()
-        })
+    pub fn next_if_each<P: Peeker>(&mut self, tests: P) -> Option<TokenStream> {
+        // Ensure peek is filled;
+        self.peek_n(P::LENGTH);
+        tests
+            .peek(&self.peek[..P::LENGTH])
+            .then(|| self.peek.drain(0..P::LENGTH).collect())
+    }
+
+    /// Returns the next tokens if they fulfill the conditions
+    /// otherwise returns None, without advancing the parser
+    pub fn peek_if_each<P: Peeker>(&mut self, tests: P) -> Option<TokenStream> {
+        // Ensure peek is filled;
+        self.peek_n_if_each(0, tests)
+    }
+
+    /// Returns the next tokens from `n` (up to 3) if they fulfill the
+    /// conditions otherwise returns None, without advancing the parser
+    pub fn peek_n_if_each<P: Peeker>(&mut self, n: usize, tests: P) -> Option<TokenStream> {
+        // Ensure peek is filled;
+        self.peek_n(P::LENGTH + n);
+        let peeked = &self.peek[n..P::LENGTH + n];
+        tests.peek(peeked).then(|| peeked.iter().cloned().collect())
     }
 
     /// Returns all tokens while `test` evaluates to true.
@@ -202,7 +318,10 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     }
 }
 
-impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
+impl<I, const PEEKER_LEN: usize> TokenParser<I, PEEKER_LEN>
+where
+    I: Iterator<Item = TokenTree>,
+{
     /// Collects remaining tokens back into a [`TokenStream`]
     pub fn into_token_stream(self) -> TokenStream {
         self.into()
@@ -226,7 +345,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     /// ```
     /// # use proc_macro_utils::TokenParser;
     /// # use quote::quote;
-    /// let mut parser = TokenParser::from(quote!( in out ));
+    /// let mut parser = TokenParser::new(quote!( in out ));
     /// assert_eq!(parser.next_keyword("in").unwrap().to_string(), "in");
     /// assert!(parser.next_keyword("in").is_none());
     /// assert_eq!(parser.next_keyword("out").unwrap().to_string(), "out");
@@ -257,7 +376,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     /// # use proc_macro2::TokenStream;
     /// # use quote::quote;
     ///
-    /// let mut tokens = TokenParser::from(quote! {A<Test, B>, remainder});
+    /// let mut tokens = TokenParser::new(quote! {A<Test, B>, remainder});
     /// assert_tokens!(tokens.next_type().unwrap(), { A<Test, B> });
     /// assert!(tokens.next_type().is_none());
     /// assert_tokens!(tokens, { , remainder });
@@ -300,7 +419,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     /// # use proc_macro2::TokenStream;
     /// # use quote::quote;
     ///
-    /// let mut tokens = TokenParser::from(quote! {A + c ::<a, b>::a < b, next_token});
+    /// let mut tokens = TokenParser::new(quote! {A + c ::<a, b>::a < b, next_token});
     /// assert_tokens!(tokens.next_expression().unwrap(), { A + c::<a, b>::a < b });
     /// assert!(tokens.next_expression().is_none());
     /// assert_tokens!(tokens, { , next_token });
@@ -380,7 +499,7 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
     }
 }
 // Implemented following https://doc.rust-lang.org/reference/tokens.html#string-literals
-#[allow(clippy::needless_continue)]
+// #[allow(clippy::needless_continue)]
 fn resolve_escapes(mut s: &str) -> String {
     let mut out = String::new();
     while !s.is_empty() {
@@ -447,18 +566,21 @@ fn resolve_escapes(mut s: &str) -> String {
     out
 }
 
-impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
+impl<I, const PEEKER_LEN: usize> TokenParser<I, PEEKER_LEN>
+where
+    I: Iterator<Item = TokenTree>,
+{
     token_tree!(
-        "a", is_group, into_group, next_group, Group;
-        "an", is_ident, into_ident, next_ident, Ident;
-        "a", is_punct, into_punct, next_punct, Punct;
-        "a", is_literal, into_literal, next_literal, Literal;
+        "a", is_group, group, into_group, peek_group, peek_n_group, next_group, Group;
+        "an", is_ident, ident, into_ident, peek_ident, peek_n_ident, next_ident, Ident;
+        "a", is_punct, punct, into_punct, peek_punct, peek_n_punct, next_punct, Punct;
+        "a", is_literal, literal, into_literal, peek_literal, peek_n_literal, next_literal, Literal;
     );
 
     delimited!(
-        is_parenthesized, next_parenthesized, "parenthesized";
-        is_braced, next_braced, "braced";
-        is_bracketed, next_bracketed, "bracketed";
+        is_parenthesized, peek_parenthesized, peek_n_parenthesized, next_parenthesized, "parenthesized";
+        is_braced, peek_braced, peek_n_braced, next_braced, "braced";
+        is_bracketed, peek_bracketed, peek_n_bracketed, next_bracketed, "bracketed";
     );
 }
 /// For now the naming of the tokens follow the names used in the
@@ -469,53 +591,56 @@ impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
 /// [`next_plus`](Self::next_plus) will match `+ =` and `+a` but not `+=`.
 // TODO figure out what the single token ones should return, TokenStream or
 // TokenTree
-impl<T: Iterator<Item = TokenTree>> TokenParser<T> {
+impl<I, const PEEKER_LEN: usize> TokenParser<I, PEEKER_LEN>
+where
+    I: Iterator<Item = TokenTree>,
+{
     punct!(
-        "+", [; is_plus], next_plus;
-        "-", [; is_minus], next_minus;
-        "*", [; is_asterix], next_star;
-        "/", [; is_slash], next_slash;
-        "%", [; is_percent], next_percent;
-        "^", [; is_caret], next_caret;
-        "!", [; is_exclamation], next_not;
-        "&", [; is_and], next_and;
-        "|", [; is_pipe], next_or;
-        "&&", [is_and; is_and], next_and_and;
-        "||", [is_pipe; is_pipe], next_or_or;
-        "<<", [is_less_than; is_less_than], next_shl;
-        ">>", [is_greater_than; is_greater_than], next_shr;
-        "+=", [is_plus; is_equals], next_plus_eq;
-        "-=", [is_minus; is_equals], next_minus_eq;
-        "*=", [is_asterix; is_equals], next_star_eq;
-        "/=", [is_slash; is_equals], next_slash_eq;
-        "%=", [is_percent; is_equals], next_percent_eq;
-        "^=", [is_caret; is_equals], next_caret_eq;
-        "&=", [is_and; is_equals], next_and_eq;
-        "|=", [is_pipe; is_equals], next_or_eq;
-        "<<=", [is_less_than, is_less_than; is_equals], next_shl_eq;
-        ">>=", [is_greater_than, is_greater_than; is_equals], next_shr_eq;
-        "=", [; is_equals], next_eq;
-        "==", [is_equals; is_equals], next_eq_eq;
-        "!=", [is_equals; is_equals], next_ne;
-        ">", [; is_greater_than], next_gt;
-        "<", [; is_less_than], next_lt;
-        ">=", [is_greater_than; is_equals], next_ge;
-        "<=", [is_less_than; is_equals], next_le;
-        "@", [; is_at], next_at;
-        ".", [; is_dot], next_dot;
-        "..", [is_dot; is_dot], next_dot_dot;
-        "...", [is_dot, is_dot; is_dot], next_dot_dot_dot;
-        "..=", [is_dot, is_dot; is_equals], next_dot_dot_eq;
-        ",", [; is_comma], next_comma;
-        ";", [; is_semi], next_semi;
-        ":", [; is_colon], next_colon;
-        "::", [is_colon; is_colon], next_path_sep;
-        "->", [is_minus; is_greater_than], next_r_arrow;
-        "=>", [is_minus; is_greater_than], next_fat_arrow;
-        "#", [; is_pound], next_pound;
-        "$", [; is_dollar], next_dollar;
-        "?", [; is_question], next_question;
-        "~", [; is_tilde], next_tilde;
+        "+", [; is_plus], peek_plus, peek_n_plus, next_plus;
+        "-", [; is_minus], peek_minus, peek_n_minus, next_minus;
+        "*", [; is_asterix], peek_star, peek_n_star, next_star;
+        "/", [; is_slash], peek_slash, peek_n_slash, next_slash;
+        "%", [; is_percent], peek_percent, peek_n_percent, next_percent;
+        "^", [; is_caret], peek_caret, peek_n_caret, next_caret;
+        "!", [; is_exclamation], peek_not, peek_n_not, next_not;
+        "&", [; is_and], peek_and, peek_n_and, next_and;
+        "|", [; is_pipe], peek_or, peek_n_or, next_or;
+        "&&", [is_and; is_and], peek_and_and, peek_n_and_and, next_and_and;
+        "||", [is_pipe; is_pipe], peek_or_or, peek_n_or_or, next_or_or;
+        "<<", [is_less_than; is_less_than], peek_shl, peek_n_shl, next_shl;
+        ">>", [is_greater_than; is_greater_than], peek_shr, peek_n_shr, next_shr;
+        "+=", [is_plus; is_equals], peek_plus_eq, peek_n_plus_eq, next_plus_eq;
+        "-=", [is_minus; is_equals], peek_minus_eq, peek_n_minus_eq, next_minus_eq;
+        "*=", [is_asterix; is_equals], peek_star_eq, peek_n_star_eq, next_star_eq;
+        "/=", [is_slash; is_equals], peek_slash_eq, peek_n_slash_eq, next_slash_eq;
+        "%=", [is_percent; is_equals], peek_percent_eq, peek_n_percent_eq, next_percent_eq;
+        "^=", [is_caret; is_equals], peek_caret_eq, peek_n_caret_eq, next_caret_eq;
+        "&=", [is_and; is_equals], peek_and_eq, peek_n_and_eq, next_and_eq;
+        "|=", [is_pipe; is_equals], peek_or_eq, peek_n_or_eq, next_or_eq;
+        "<<=", [is_less_than, is_less_than; is_equals], peek_shl_eq, peek_n_shl_eq, next_shl_eq;
+        ">>=", [is_greater_than, is_greater_than; is_equals], peek_shr_eq, peek_n_shr_eq, next_shr_eq;
+        "=", [; is_equals], peek_eq, peek_n_eq, next_eq;
+        "==", [is_equals; is_equals], peek_eq_eq, peek_n_eq_eq, next_eq_eq;
+        "!=", [is_equals; is_equals], peek_ne, peek_n_ne, next_ne;
+        ">", [; is_greater_than], peek_gt, peek_n_gt, next_gt;
+        "<", [; is_less_than], peek_lt, peek_n_lt, next_lt;
+        ">=", [is_greater_than; is_equals], peek_ge, peek_n_ge, next_ge;
+        "<=", [is_less_than; is_equals], peek_le, peek_n_le, next_le;
+        "@", [; is_at], peek_at, peek_n_at, next_at;
+        ".", [; is_dot], peek_dot, peek_n_dot, next_dot;
+        "..", [is_dot; is_dot], peek_dot_dot, peek_n_dot_dot, next_dot_dot;
+        "...", [is_dot, is_dot; is_dot], peek_dot_dot_dot, peek_n_dot_dot_dot, next_dot_dot_dot;
+        "..=", [is_dot, is_dot; is_equals], peek_dot_dot_eq, peek_n_dot_dot_eq, next_dot_dot_eq;
+        ",", [; is_comma], peek_comma, peek_n_comma, next_comma;
+        ";", [; is_semi], peek_semi, peek_n_semi, next_semi;
+        ":", [; is_colon], peek_colon, peek_n_colon, next_colon;
+        "::", [is_colon; is_colon], peek_path_sep, peek_n_path_sep, next_path_sep;
+        "->", [is_minus; is_greater_than], peek_r_arrow, peek_n_r_arrow, next_r_arrow;
+        "=>", [is_minus; is_greater_than], peek_fat_arrow, peek_n_fat_arrow, next_fat_arrow;
+        "#", [; is_pound], peek_pound, peek_n_pound, next_pound;
+        "$", [; is_dollar], peek_dollar, peek_n_dollar, next_dollar;
+        "?", [; is_question], peek_question, peek_n_question, next_question;
+        "~", [; is_tilde], peek_tilde, peek_n_tilde, next_tilde;
     );
 }
 
@@ -528,7 +653,7 @@ mod test {
 
     #[test]
     fn ty() {
-        let mut at = TokenParser::from(quote! {Name, <Some, Generic, Type>});
+        let mut at = TokenParser::new(quote! {Name, <Some, Generic, Type>});
         assert_tokens!(at.next_type().unwrap(), { Name });
         at.next();
         assert_tokens!(
@@ -539,7 +664,7 @@ mod test {
 
     #[test]
     fn expr() {
-        let mut at = TokenParser::from(
+        let mut at = TokenParser::new(
             quote! {a + b, <Some, Generic, Type>::something + <a,b> * a < b, "hi"},
         );
         assert_tokens!(at.next_expression().unwrap(), { a + b });
@@ -553,7 +678,7 @@ mod test {
 
     #[test]
     fn combined_tokens() {
-        let mut parser = TokenParser::from(quote! {
+        let mut parser = TokenParser::new(quote! {
             -> && ..= >=
         });
         assert_tokens!(parser.next_r_arrow().unwrap(), { -> });
@@ -564,18 +689,25 @@ mod test {
 
     #[test]
     fn peek() {
-        let mut parser = TokenParser::from(quote! {
-            0 1 2 3
+        let mut parser = TokenParser::new(quote! {
+            0 {} 2 3 += .. =
         });
         assert_eq!(parser.peek().unwrap().to_string(), "0");
         assert_eq!(parser.peek_n(0).unwrap().to_string(), "0");
-        assert_eq!(parser.peek_n(1).unwrap().to_string(), "1");
+        assert_eq!(parser.peek_n(1).unwrap().to_string(), "{}");
         assert_eq!(parser.peek_n(2).unwrap().to_string(), "2");
+
+        assert_eq!(parser.peek_literal().unwrap().to_string(), "0");
+        assert!(parser.peek_group().is_none());
+        parser.next().unwrap();
+        assert!(parser.peek_group().is_some());
+        assert!(parser.peek_n_plus_eq(3).is_some());
+        assert!(parser.peek_n_dot_dot(5).is_some());
     }
 
     #[test]
     fn keyword() {
-        let mut parser = TokenParser::from(quote! {
+        let mut parser: TokenParser<_, 4> = TokenParser::from(quote! {
             in out and or
         });
         assert_eq!(parser.next_keyword("in").unwrap().to_string(), "in");
