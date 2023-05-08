@@ -369,6 +369,50 @@ where
         })
     }
 
+    /// Returns the next ident if it matches the specified keyword without
+    /// advancing the parser.
+    ///
+    /// While this is called `peek_keyword` it is not restricted to rust
+    /// keywords, it can be used with any ident.
+    /// ```
+    /// # use proc_macro_utils::TokenParser;
+    /// # use quote::quote;
+    /// let mut parser = TokenParser::new(quote!( in out ));
+    /// assert_eq!(parser.peek_keyword("in").unwrap().to_string(), "in");
+    /// assert_eq!(parser.peek_keyword("in").unwrap().to_string(), "in");
+    /// assert!(parser.peek_keyword("out").is_none());
+    /// parser.next().unwrap();
+    /// assert_eq!(parser.peek_keyword("out").unwrap().to_string(), "out");
+    /// ```
+    #[must_use]
+    pub fn peek_keyword<K: ?Sized>(&mut self, keyword: &K) -> Option<&Ident>
+    where
+        Ident: PartialEq<K>,
+    {
+        self.peek_n_keyword(0, keyword)
+    }
+
+    /// Returns the nth token if it matches the specified keyword without
+    /// advancing the parser.
+    ///
+    /// While this is called `peek_n_keyword` it is not restricted to rust
+    /// keywords, it can be used with any ident.
+    /// ```
+    /// # use proc_macro_utils::TokenParser;
+    /// # use quote::quote;
+    /// let mut parser = TokenParser::new(quote!( in out ));
+    /// assert_eq!(parser.peek_keyword("in").unwrap().to_string(), "in");
+    /// assert_eq!(parser.peek_n_keyword(1, "out").unwrap().to_string(), "out");
+    /// assert!(parser.peek_keyword("out").is_none());
+    /// ```
+    #[must_use]
+    pub fn peek_n_keyword<K: ?Sized>(&mut self, n: usize, keyword: &K) -> Option<&Ident>
+    where
+        Ident: PartialEq<K>,
+    {
+        self.peek_n_ident(n).filter(|&ident| ident == keyword)
+    }
+
     /// Returns the next ident if it matches the specified keyword.
     ///
     /// While this is called `next_keyword` it is not restricted to rust
