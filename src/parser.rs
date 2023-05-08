@@ -232,22 +232,20 @@ macro_rules! delimited {
     ($($test:ident, $peek:ident, $peek_n:ident, $name:ident, $doc:literal;)*) => {
         $(#[doc = concat!("Returns the next token if it is a ", $doc ," group.")]
         #[must_use]
-        pub fn $name(&mut self) -> Option<TokenStream> {
-            self.$peek().map(|stream| {
-                self.next().unwrap();
-                stream
+        pub fn $name(&mut self) -> Option<Group> {
+            self.$peek().is_some().then(|| {
+                self.next_group().unwrap()
             })
         })*
         $(#[doc = concat!("Returns the next token if it is a", $doc ," group, without advancing the parser.")]
         #[must_use]
-        pub fn $peek(&mut self) -> Option<TokenStream> {
+        pub fn $peek(&mut self) -> Option<&Group> {
             self.$peek_n(0)
         })*
         $(#[doc = concat!("Returns the `n`th token if it is a ", $doc ," group, without advancing the parser.")]
         #[must_use]
-        pub fn $peek_n(&mut self, n: usize) -> Option<TokenStream> {
-            self.peek_n(n).and_then(|token|
-                token.$test().then(|| token.group().unwrap().stream()))
+        pub fn $peek_n(&mut self, n: usize) -> Option<&Group> {
+            self.peek_n_group(n).filter(|g| g.$test())
         })*
     };
 }

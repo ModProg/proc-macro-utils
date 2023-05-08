@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking Change** Added const generic buffer size to `TokenParser`.
 - **Breaking Change** `Peeker::peek` takes `&[TokenTree]` instead of `TokenParser`.
+- **Breaking Change** `*_{delimiter}` returns `Group` instead of the contained stream.
+  To get to the stream call `.stream()`
 - `TokenParser` peeking supports `n` greater than stack buffer, allowing spilling to heap.
 - Increased default `TokenParser` peek buffer to `6`.
 - Marked parser functions as must_use.
