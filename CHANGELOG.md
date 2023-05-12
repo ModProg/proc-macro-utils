@@ -5,18 +5,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Increased documentation and test coverage.
+
 ### Added
 - `quote::ToTokens` implementation for `TokenParser` (`quote` is a new default feature).
 - `peek_{token}` and `peek_n_{token}` to `TokenParser`.
+- `alone` to `TokenTreePunct` ensuring if a token is `Punct` its `spacing` is `Alone`
+- `*_alone` functions to `TokenParser` setting the last token to `Alone` if it is a punctuation.
+- `next_n` to `TokenParser` returning the next `n` tokens.
+- `peek_range` to `TokenParser` returning a range of tokens.
 
 ### Changed
 - **Breaking Change** Added const generic buffer size to `TokenParser`.
 - **Breaking Change** `Peeker::peek` takes `&[TokenTree]` instead of `TokenParser`.
+- **Breaking Change** `Peeker::LENGTH` is function `len` now.
 - **Breaking Change** `*_{delimiter}` returns `Group` instead of the contained stream.
   To get to the stream call `.stream()`
+- **Breaking Change** `TokenParser::*_{punctuation}` got renamed to `*_tt_{punctuation}` and their behaviour was changed to match that of `$tt` in macro_rules instead of requiring `Spacing::Alone`, returned `spacing` is set to `Alone`.
 - `TokenParser` peeking supports `n` greater than stack buffer, allowing spilling to heap.
 - Increased default `TokenParser` peek buffer to `6`.
 - Marked parser functions as must_use.
+- `next_expr` and `next_type` set the last tokens `spacing` to `Alone`.
 
 ## [0.6.0] - 2023-04-29
 - `TokenParser::next_keyword(v)`

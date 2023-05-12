@@ -6,6 +6,9 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(rustdoc::all)]
 
+#[cfg(doc)]
+use proc_macro2::{Punct, Spacing};
+
 #[cfg(feature = "proc-macro")]
 extern crate proc_macro;
 
@@ -137,10 +140,12 @@ macro_rules! token_tree_ext {
                 impl TokenTreeExt "[`proc_macro::TokenTree`]", TokenTree2Ext "[`proc_macro2::TokenTree`]"  for TokenTree {
                     $(
                         #[doc = concat!("Tests if the token tree is ", $a, " ", $token, ".")]
+                        #[must_use]
                         fn $is(&self) -> bool {
                             matches!(self, Self::$variant(_))
                         }
                         #[doc = concat!("Get the [`", stringify!($variant), "`] inside this token tree, or [`None`] if it isn't ", $a, " ", $token, ".")]
+                        #[must_use]
                         fn $as(&self) -> Option<&$variant> {
                             if let Self::$variant(inner) = &self {
                                 Some(inner)
@@ -149,6 +154,7 @@ macro_rules! token_tree_ext {
                             }
                         }
                         #[doc = concat!("Get the [`", stringify!($variant), "`] inside this token tree, or [`None`] if it isn't ", $a, " ", $token, ".")]
+                        #[must_use]
                         fn $into(self) -> Option<$variant> {
                             if let Self::$variant(inner) = self {
                                 Some(inner)
@@ -176,17 +182,28 @@ macro_rules! punctuations {
             /// Trait to test for punctuation
             impl TokenTreePunct for TokenTree {
                 $(#[doc = concat!("Tests if the token is `", $char, "`")]
+                #[must_use]
                 fn $name(&self) -> bool {
                     matches!(self, TokenTree::Punct(punct) if punct.$name())
                 })*
                 /// Tests if token is followed by some none punctuation token or whitespace.
+                #[must_use]
                 fn is_alone(&self) -> bool {
                     matches!(self, TokenTree::Punct(punct) if punct.is_alone())
                 }
                 /// Tests if token is followed by another punct and can potentially be combined into
                 /// a multi-character operator.
+                #[must_use]
                 fn is_joint(&self) -> bool {
                     matches!(self, TokenTree::Punct(punct) if punct.is_joint())
+                }
+                /// If sets the [`spacing`](Punct::spacing) of a punct to [`Alone`](Spacing::Alone).
+                #[must_use]
+                fn alone(self) -> Self {
+                    match self {
+                        Self::Punct(p) => Self::Punct(p.alone()),
+                        it => it
+                    }
                 }
             }
             impl TokenTreePunct for Punct {
@@ -198,6 +215,15 @@ macro_rules! punctuations {
                 }
                 fn is_joint(&self) -> bool {
                     self.spacing() == Spacing::Joint
+                }
+                fn alone(self) -> Self {
+                    if self.is_alone() {
+                        self
+                    } else {
+                        let mut this = Punct::new(self.as_char(), Spacing::Alone);
+                        this.set_span(self.span());
+                        this
+                    }
                 }
             }
         }
@@ -235,12 +261,14 @@ macro_rules! delimited {
             /// Trait to test for delimiters of groups
             impl Delimited for TokenTree {
                 $(#[doc = concat!("Tests if the token is a group with ", $doc)]
+                #[must_use]
                 fn $name(&self) -> bool {
                     matches!(self, TokenTree::Group(group) if group.$name())
                 })*
             }
             impl Delimited for Group {
                 $(#[doc = concat!("Tests if a group has ", $doc)]
+                #[must_use]
                 fn $name(&self) -> bool {
                     matches!(self.delimiter(), Delimiter::$delimiter)
                 })*

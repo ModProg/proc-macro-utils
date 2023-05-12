@@ -1,6 +1,7 @@
-#[cfg(doc)]
-use proc_macro2::Spacing;
-use proc_macro2::{token_stream, Group, Ident, Literal, Punct, TokenStream, TokenTree};
+use std::ops::{Bound, RangeBounds};
+use std::{iter, mem};
+
+use proc_macro2::{token_stream, Group, Ident, Literal, Punct, Spacing, TokenStream, TokenTree};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreePunct};
@@ -10,7 +11,7 @@ use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreePunct};
 /// Trait that allows to peek a constant number of tokens.
 pub trait Peeker {
     /// Number of tokens this peeker checks.
-    const LENGTH: usize;
+    fn len(&self) -> usize;
 
     /// Test if the tokens match.
     ///
@@ -22,7 +23,9 @@ pub trait Peeker {
 }
 
 impl<T: FnOnce(&TokenTree) -> bool> Peeker for T {
-    const LENGTH: usize = 1;
+    fn len(&self) -> usize {
+        1
+    }
 
     #[must_use]
     fn peek(self, parser: &[TokenTree]) -> bool {
@@ -34,7 +37,7 @@ macro_rules! impl_peeker {
     ($(($($T:ident $idx:tt),+$(,)?),$len:literal;)*) => {
         $(
             impl<$($T: FnOnce(&TokenTree) -> bool),+> Peeker for ($($T,)+) {
-                const LENGTH: usize = $len;
+                fn len(&self) -> usize { $len }
                 fn peek(self, parser: &[TokenTree]) -> bool {
                     $(self.$idx(&parser[$idx]))&&+
                 }
@@ -48,6 +51,18 @@ impl_peeker![
     (T1 0, T2 1), 2;
     (T1 0, T2 1, T3 2), 3;
 ];
+
+struct PeekLen(usize);
+
+impl Peeker for PeekLen {
+    fn len(&self) -> usize {
+        self.0
+    }
+
+    fn peek(self, _: &[TokenTree]) -> bool {
+        true
+    }
+}
 
 /// Wrapper for [`TokenStream::into_iter`] allowing not only to iterate on
 /// tokens but also to parse simple structures like types or expressions, though
@@ -75,15 +90,16 @@ impl_peeker![
 /// [`SmallVec`] with its capacity specified via `PEEKER_LEN` (default is 6).
 /// This means peeking up to `6` tokens ahead happens without heap allocation.
 /// Token groups can need up to `3` tokens of additional space e.g.
-/// [`peek_n_dot_dot_eq()`](Self::peek_n_dot_dot_eq) can, with the default
+/// [`peek_n_tt_dot_dot_eq()`](Self::peek_n_tt_dot_dot_eq) can, with the default
 /// allocation free be called with up to `3`, and
-/// [`peek_n_plus_eq()`](Self::peek_n_plus_eq) up to `4`.
+/// [`peek_n_tt_plus_eq()`](Self::peek_n_tt_plus_eq) up to `4`.
 ///
 /// **Warning**: Setting `PEEKER_LEN = 0` means even
 /// [`is_empty()`](Self::is_empty) and [`peek()`](Self::peek) allocate, and a
 /// value below `3` will make some of the
 /// [`peek_{punctuation}`](#impl-TokenParser<I,+PEEKER_LEN>-3) allocate
-/// additionally.
+/// additionally. But do also refrain from setting `PEEKER_LEN` too high, as
+/// this is the stack allocation used.
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
 #[must_use]
@@ -183,22 +199,83 @@ where
     }
 }
 
-macro_rules! punct {
-    ($($punct:literal, [$($tests:ident),*; $last:ident], $peek:ident, $peek_n:ident, $name:ident);*$(;)?) => {
-        $(#[doc = concat!("Returns the next token if it is a `", $punct ,"`")]
+macro_rules! next_punct {
+    ($self:ident, $only:ident) => {
+        $self.next_if(TokenTree::$only).map(TokenTree::alone).map(iter::once).map(Iterator::collect)
+    };
+    ($self:ident, $($joint:ident),+ $(!$($not:ident),+)?) => {
+        next_punct!($self, 0, $($joint),+ $(!$($not),+)?;true)
+    };
+    ($self:ident, $idx:expr, $first:ident, $($joint:ident),+ $(!$($not:ident),*)?;$($cond:tt)*) => {
+        next_punct!($self, $idx+1, $($joint),+ $(!$($not),+)?; $($cond)* && matches!($self.peek_n($idx), Some(tt) if tt.$first() && tt.is_joint()))
+    };
+    ($self:ident, $idx:expr, $last:ident;$($cond:tt)*) => {
+        ($($cond)* && matches!($self.peek_n($idx), Some(tt) if tt.$last())).then(|| $self.next_n_alone($idx+1).expect("peeked n"))
+    };
+    ($self:ident, $idx:expr, $last:ident !$($not:ident),+;$($cond:tt)*) => {
+        ($($cond)* && matches!($self.peek_n($idx), Some(tt) if tt.$last())
+         && (matches!($self.peek_n($idx), Some(tt) if tt.is_alone()) ||
+         !(matches!($self.peek_n($idx+1), Some(tt) if false $(|| tt.$not())*))))
+            .then(|| $self.next_n_alone($idx+1).expect("peeked n"))
+    };
+}
+
+macro_rules! peek_punct {
+    ($offset:expr, $self:ident, $only:ident) => {
+        $self.peek_n($offset).filter(|t| t.$only()).cloned().map(TokenTree::alone).map(iter::once).map(Iterator::collect)
+    };
+    ($offset:expr, $self:ident, $($joint:ident),+ $(!$($not:ident),+)?) => {
+        peek_punct!($offset, $self, $offset, $($joint),+ $(!$($not),+)?;true)
+    };
+    ($offset:expr, $self:ident, $idx:expr, $first:ident, $($joint:ident),+ $(!$($not:ident),*)?;$($cond:tt)*) => {
+        peek_punct!($offset, $self, $idx+1, $($joint),+ $(!$($not),+)?; $($cond)* && matches!($self.peek_n($idx), Some(tt) if tt.$first() && tt.is_joint()))
+    };
+    ($offset:expr, $self:ident, $idx:expr, $last:ident;$($cond:tt)*) => {
+        ($($cond)* && matches!($self.peek_n($idx), Some(tt) if tt.$last())).then(|| $self.peek_range_alone($offset..$idx+1).expect("peeked n"))
+    };
+    ($offset:expr, $self:ident, $idx:expr, $last:ident !$($not:ident),+;$($cond:tt)*) => {
+        ($($cond)* && matches!($self.peek_n($idx), Some(tt) if tt.$last())
+         && (matches!($self.peek_n($idx), Some(tt) if tt.is_alone()) ||
+         !(matches!($self.peek_n($idx+1), Some(tt) if false $(|| tt.$not())*))))
+            .then(|| $self.peek_range_alone($offset..$idx+1).expect("peeked n"))
+    };
+}
+
+macro_rules! punct_tt {
+    ($($punct:literal, [$($cond:tt)*], $peek:ident, $peek_n:ident, $name:ident);*$(;)?) => {
+        $(#[doc = concat!("Returns the next token if it is a [punctuation token tree](https://doc.rust-lang.org/reference/tokens.html#punctuation) `", $punct ,"` following the same rules as [macro_rule's tt](https://doc.rust-lang.org/reference/macros-by-example.html#metavariables).")]
+        #[doc = concat!("```
+use proc_macro_utils::{assert_tokens, TokenParser};
+use quote::quote;
+let mut parser = TokenParser::new(quote!(", $punct, " 1 b));
+assert_tokens!(parser.", stringify!($name), "().unwrap(), { ", $punct, " });
+assert_tokens!(parser, { 1 b });
+```")]
         #[must_use]
         pub fn $name(&mut self) -> Option<TokenStream> {
-            self.next_if_each(($(|t:&TokenTree|t.is_joint() && t.$tests(),)* |t:&TokenTree| t.is_alone() && t.$last()))
-        })*
-        $(#[doc = concat!("Returns the next token if it is a `", $punct ,"` without advancing the parser")]
+            next_punct!(self, $($cond)*)
+        }
+        #[doc = concat!("Returns the next token if it is a [punctuation token tree](https://doc.rust-lang.org/reference/tokens.html#punctuation) `", $punct ,"` following the same rules as [macro_rule's tt](https://doc.rust-lang.org/reference/macros-by-example.html#metavariables) without advancing the parser")]
+        #[doc = concat!("```
+use proc_macro_utils::{assert_tokens, TokenParser};
+use quote::quote;
+let mut parser = TokenParser::new(quote!(", $punct, " 1 b));
+assert_tokens!(parser.", stringify!($peek), "().unwrap(), { ", $punct, " });
+```")]
         #[must_use]
         pub fn $peek(&mut self) -> Option<TokenStream> {
-            self.$peek_n(0)
-        })*
-        $(#[doc = concat!("Returns the `n`th token if it is a `", $punct ,"` without advancing the parser")]
+            peek_punct!(0, self, $($cond)*)
+        }
+        #[doc = concat!("Returns the `n`th token if it is a [punctuation token tree](https://doc.rust-lang.org/reference/tokens.html#punctuation) `", $punct ,"` following the same rules as [macro_rule's tt](https://doc.rust-lang.org/reference/macros-by-example.html#metavariables) without advancing the parser")]
+        #[doc = concat!("```
+use proc_macro_utils::{assert_tokens, TokenParser};
+use quote::quote;
+let mut parser = TokenParser::new(quote!(b ", $punct, " 1));
+assert_tokens!(parser.", stringify!($peek_n), "(1).unwrap(), { ", $punct, " });
+```")]
         #[must_use]
-        pub fn $peek_n(&mut self, n:usize) -> Option<TokenStream> {
-            self.peek_n_if_each(n, ($(|t:&TokenTree|t.is_joint() && t.$tests(),)* |t:&TokenTree| t.is_alone() && t.$last()))
+        pub fn $peek_n(&mut self, n: usize) -> Option<TokenStream> {
+            peek_punct!(n, self, $($cond)*)
         })*
     };
     ([$test:ident $($tests:ident)*]) => {
@@ -256,12 +333,30 @@ where
     I: Iterator<Item = TokenTree>,
 {
     /// Checks if there are remaining tokens
+    /// ```
+    /// use proc_macro_utils::TokenParser;
+    /// use quote::quote;
+    ///
+    /// let mut parser = TokenParser::new(quote!(token));
+    /// assert!(!parser.is_empty());
+    /// _ = parser.next();
+    /// assert!(parser.is_empty())
+    /// ```
     #[must_use]
     pub fn is_empty(&mut self) -> bool {
         self.peek().is_none()
     }
 
     /// Peeks the next token without advancing the parser
+    /// ```
+    /// use proc_macro_utils::{assert_tokens, TokenParser};
+    /// use quote::quote;
+    ///
+    /// let mut parser = TokenParser::new(quote!(token));
+    /// assert_tokens!(parser.peek().cloned(), { token });
+    /// _ = parser.next();
+    /// assert!(parser.peek().is_none())
+    /// ```
     #[must_use]
     pub fn peek(&mut self) -> Option<&TokenTree> {
         if self.peek.is_empty() {
@@ -271,6 +366,15 @@ where
     }
 
     /// Peeks the `n`th token without advancing the parser
+    /// ```
+    /// use proc_macro_utils::{assert_tokens, TokenParser};
+    /// use quote::quote;
+    ///
+    /// let mut parser = TokenParser::new(quote!(token , third));
+    /// assert_tokens!(parser.peek_n(2).cloned(), { third });
+    /// assert_tokens!(parser.peek_n(1).cloned(), { , });
+    /// assert!(parser.peek_n(3).is_none())
+    /// ```
     #[must_use]
     pub fn peek_n(&mut self, n: usize) -> Option<&TokenTree> {
         for _ in self.peek.len()..=n {
@@ -281,22 +385,56 @@ where
 
     /// Returns the next token if it fulfills the condition otherwise returns
     /// None and doesn't advance the parser
+    /// ```
+    /// use proc_macro_utils::{assert_tokens, TokenParser, TokenTreePunct};
+    /// use quote::quote;
+    ///
+    /// let mut parser = TokenParser::new(quote!(::));
+    /// assert!(parser.next_if(TokenTreePunct::is_alone).is_none());
+    /// _ = parser.next();
+    /// assert_tokens!(parser.next_if(TokenTreePunct::is_alone), { : });
+    /// ```
     #[must_use]
     pub fn next_if(&mut self, test: impl FnOnce(&TokenTree) -> bool) -> Option<TokenTree> {
         test(self.peek()?).then(|| self.next().expect("was peeked"))
     }
 
     /// Returns the next tokens if they fulfill the conditions
-    /// otherwise returns None and doesn't advance the parser
+    /// otherwise returns None and doesn't advance the parser.
+    /// ```
+    /// use proc_macro_utils::{assert_tokens, TokenParser, TokenTreePunct};
+    /// use quote::quote;
+    ///
+    /// let mut parser = TokenParser::new(quote!( -->));
+    /// assert!(parser.next_if_each((TokenTreePunct::is_minus, TokenTreePunct::is_greater_than)).is_none());
+    /// _ = parser.next();
+    /// assert_tokens!(parser.next_if_each((TokenTreePunct::is_minus, TokenTreePunct::is_greater_than)).unwrap(), { -> });
+    /// ```
     #[must_use]
     pub fn next_if_each<P: Peeker>(&mut self, tests: P) -> Option<TokenStream> {
+        let len = tests.len();
         // Ensure peek is filled;
-        if PEEKER_LEN > 0 {
-            self.peek_n(P::LENGTH - 1)?;
-        }
+        self.peek_n(len - 1)?;
         tests
-            .peek(&self.peek[..P::LENGTH])
-            .then(|| self.peek.drain(0..P::LENGTH).collect())
+            .peek(&self.peek[..len])
+            .then(|| self.peek.drain(0..len).collect())
+    }
+
+    /// Returns the next tokens if they fulfill the conditions
+    /// otherwise returns None and doesn't advance the parser. If the last token
+    /// is a punct it's [`spacing`](Punct::spacing()) is set to
+    /// [`Alone`](Spacing::Alone).
+    #[must_use]
+    pub fn next_if_each_alone<P: Peeker>(&mut self, tests: P) -> Option<TokenStream> {
+        let len = tests.len();
+        // Ensure peek is filled;
+        self.peek_n(len - 1)?;
+        tests.peek(&self.peek[..len]).then(|| {
+            if self.peek[len - 1].is_punct() {
+                self.peek[len - 1] = self.peek[len - 1].clone().alone();
+            }
+            self.peek.drain(0..len).collect()
+        })
     }
 
     /// Returns the next tokens if they fulfill the conditions
@@ -311,12 +449,33 @@ where
     /// conditions otherwise returns None, without advancing the parser
     #[must_use]
     pub fn peek_n_if_each<P: Peeker>(&mut self, n: usize, tests: P) -> Option<TokenStream> {
+        let len = tests.len();
         // Ensure peek is filled;
-        if PEEKER_LEN > 0 {
-            self.peek_n(P::LENGTH + n - 1)?;
-        }
-        let peeked = &self.peek[n..P::LENGTH + n];
+        self.peek_n(len + n)?;
+        let peeked = &self.peek[n..len + n];
         tests.peek(peeked).then(|| peeked.iter().cloned().collect())
+    }
+
+    /// Returns the next tokens from `n` if they fulfill the conditions
+    /// otherwise returns None, without advancing the parser. If the last token
+    /// is a punct it's [`spacing`](Punct::spacing()) is set to
+    /// [`Alone`](Spacing::Alone).
+    #[must_use]
+    pub fn peek_n_if_each_alone<P: Peeker>(&mut self, n: usize, tests: P) -> Option<TokenStream> {
+        let len = tests.len();
+        if len == 0 {
+            return Some(TokenStream::new());
+        }
+        // Ensure peek is filled;
+        self.peek_n(len + n)?;
+        let peeked = &self.peek[n..len + n];
+        tests.peek(peeked).then(|| {
+            peeked[..len - 1]
+                .iter()
+                .cloned()
+                .chain(iter::once(peeked[len - 1].clone().alone()))
+                .collect()
+        })
     }
 
     /// Returns all tokens while `test` evaluates to true.
@@ -336,12 +495,197 @@ where
         }
     }
 
+    /// Returns all tokens while `test` evaluates to true. If the last token
+    /// is a punct it's [`spacing`](Punct::spacing()) is set to
+    /// [`Alone`](Spacing::Alone).
+    ///
+    /// Returns `None` if empty or `test(first_token) == false`
+    #[must_use]
+    pub fn next_while_alone(
+        &mut self,
+        mut test: impl FnMut(&TokenTree) -> bool,
+    ) -> Option<TokenStream> {
+        if self.peek().is_none() || !test(self.peek().expect("was peeked")) {
+            None
+        } else {
+            let mut token_stream = TokenStream::new();
+            let mut last = self.next().expect("was peeked");
+            while let Some(token) = self.next_if(&mut test) {
+                token_stream.push(mem::replace(&mut last, token));
+            }
+            token_stream.push(last.alone());
+            Some(token_stream)
+        }
+    }
+
     /// Returns all tokens while `test` evaluates to false.
     ///
     /// Returns `None` if empty or `test(first_token) == true`.
     #[must_use]
     pub fn next_until(&mut self, mut test: impl FnMut(&TokenTree) -> bool) -> Option<TokenStream> {
         self.next_while(|token| !test(token))
+    }
+
+    /// Returns all tokens while `test` evaluates to false. If the last token is
+    /// a punct it's [`spacing`](Punct::spacing()) is set to
+    /// [`Alone`](Spacing::Alone).
+    ///
+    /// Returns `None` if empty or `test(first_token) == true`.
+    #[must_use]
+    pub fn next_until_alone(
+        &mut self,
+        mut test: impl FnMut(&TokenTree) -> bool,
+    ) -> Option<TokenStream> {
+        self.next_while_alone(|token| !test(token))
+    }
+
+    /// Returns the next `n` tokens.
+    ///
+    /// Returns `None` if the parser contains less then `n` tokens.
+    ///
+    /// **Note:** This should only be used for small `n` ideally less than
+    /// `PEEKER_LEN`. Otherwise something like this would be more performant:
+    /// ```
+    /// use proc_macro2::TokenStream;
+    /// use proc_macro_utils::{TokenParser, assert_tokens};
+    /// use quote::quote;
+    ///
+    /// let mut parser = TokenParser::new(quote!(1 2 3 /*...*/ 1000 1001 1002 1003));
+    /// let n = 1000;
+    /// # let n = 4;
+    /// // This does not ensure that `next_up_to_n` contains exactly n tokens
+    /// let next_up_to_n: TokenStream = parser.by_ref().take(n).collect();
+    /// assert_tokens!(next_up_to_n, { 1 2 3 /* ...*/ 1000 });
+    /// assert_tokens!(parser, { 1001 1002 1003 });
+    /// ```
+    #[must_use]
+    pub fn next_n(&mut self, n: usize) -> Option<TokenStream> {
+        self.next_if_each(PeekLen(n))
+    }
+
+    /// Returns the next `n` tokens. If the last token is a punct it's
+    /// [`spacing`](Punct::spacing()) is set to [`Alone`](Spacing::Alone).
+    ///
+    /// Returns `None` if the parser contains less then `n` tokens.
+    ///
+    /// **Note:** This should only be used for small `n` ideally less than
+    /// `PEEKER_LEN`. Otherwise something like this would be more performant:
+    /// ```
+    /// use proc_macro2::TokenStream;
+    /// use proc_macro_utils::{TokenParser, assert_tokens, TokenTreePunct};
+    /// use quote::quote;
+    ///
+    /// let mut parser = TokenParser::new(quote!(1 2 3 /*...*/ 1000 1001 1002 1003));
+    /// let n = 1000;
+    /// # let n = 4;
+    /// // This does not ensure that `next_up_to_n` contains exactly n tokens
+    /// let mut next_up_to_n: TokenStream = parser.by_ref().take(n - 1).collect();
+    /// next_up_to_n.extend(parser.next().map(TokenTreePunct::alone));
+    /// assert_tokens!(next_up_to_n, { 1 2 3 /* ...*/ 1000 });
+    /// assert_tokens!(parser, { 1001 1002 1003 });
+    /// ```
+    #[must_use]
+    pub fn next_n_alone(&mut self, n: usize) -> Option<TokenStream> {
+        self.next_if_each_alone(PeekLen(n))
+    }
+
+    /// Returns the specified `range` of tokens.
+    ///
+    /// Returns `None` if the parser does not contain this `range` tokens.
+    ///
+    /// **Note:** This should only be used for small and close to start `range`s
+    /// ideally less than `PEEKER_LEN`. Otherwise something like this could be
+    /// more performant:
+    /// ```
+    /// use proc_macro2::TokenStream;
+    /// use proc_macro_utils::{TokenParser, assert_tokens};
+    /// use quote::quote;
+    ///
+    /// let parser = TokenParser::new(quote!(0 1 2 3 /*...*/ 1000 1001 1002 1003));
+    /// let start = 1000;
+    /// # let start = 4;
+    /// let end = 1003;
+    /// # let end = 7;
+    /// // This does not ensure that `peeked_range` contains any tokens
+    /// let peeked_range: TokenStream = parser.clone().skip(start).take(end -
+    /// start).collect();
+    /// assert_tokens!(peeked_range, { 1000 1001 1002 });
+    /// assert_tokens!(parser, { 0 1 2 3 /*...*/ 1000 1001 1002 1003 });
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if used without upper bound i.e. `start..`.
+    #[must_use]
+    pub fn peek_range(&mut self, range: impl RangeBounds<usize>) -> Option<TokenStream> {
+        let start = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n + 1,
+            Bound::Unbounded => 0,
+        };
+        let len = match range.end_bound() {
+            Bound::Included(&n) if n < start => return None,
+            Bound::Included(&n) => n - start + 1,
+            Bound::Excluded(&n) if n <= start => return None,
+            Bound::Excluded(&n) => n - start,
+            Bound::Unbounded => {
+                panic!("unbounded range not supported, use `clone().skip()` instead")
+            }
+        };
+
+        self.peek_n_if_each(start, PeekLen(len))
+    }
+
+    /// Returns the specified `range` of tokens. If the last token is a punct
+    /// it's [`spacing`](Punct::spacing()) is set to
+    /// [`Alone`](Spacing::Alone).
+    ///
+    /// Returns `None` if the parser does not contain this `range` tokens.
+    ///
+    /// **Note:** This should only be used for small and close to start `range`s
+    /// ideally less than `PEEKER_LEN`. Otherwise something like this could be
+    /// more performant:
+    ///
+    /// ```
+    /// use proc_macro2::TokenStream;
+    /// use proc_macro_utils::{assert_tokens, TokenParser, TokenTreePunct};
+    /// use quote::quote;
+    ///
+    /// let parser = TokenParser::new(quote!(0 1 2 3 /*...*/ 1000 1001 1002 1003));
+    /// let start = 1000;
+    /// # let start = 4;
+    /// let end = 1003;
+    /// # let end = 7;
+    /// // This does not ensure that `peeked_range` contains any tokens
+    /// let mut cloned = parser.clone().skip(start);
+    /// let mut peeked_range: TokenStream = cloned.by_ref().take(end - start - 1).collect();
+    /// peeked_range.extend(cloned.next().map(TokenTreePunct::alone));
+    ///
+    /// assert_tokens!(peeked_range, { 1000 1001 1002 });
+    /// assert_tokens!(parser, { 0 1 2 3 /*...*/ 1000 1001 1002 1003 });
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if used without upper bound i.e. `start..`.
+    #[must_use]
+    pub fn peek_range_alone(&mut self, range: impl RangeBounds<usize>) -> Option<TokenStream> {
+        let start = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n + 1,
+            Bound::Unbounded => 0,
+        };
+        let len = match range.end_bound() {
+            Bound::Included(&n) if n < start => return None,
+            Bound::Included(&n) => n - start + 1,
+            Bound::Excluded(&n) if n <= start => return None,
+            Bound::Excluded(&n) => n - start,
+            Bound::Unbounded => {
+                panic!("unbounded range not supported, use `clone().skip()` instead")
+            }
+        };
+
+        self.peek_n_if_each_alone(start, PeekLen(len))
     }
 }
 
@@ -464,7 +808,7 @@ where
 
         let mut chevron_level: u32 = 0;
 
-        self.next_while(|token| {
+        self.next_while_alone(|token| {
             if token.is_less_than() {
                 chevron_level += 1;
             } else if token.is_greater_than() {
@@ -510,6 +854,7 @@ where
         let mut start = true;
 
         let mut tokens = TokenStream::new();
+        let mut last = self.next().expect("first token was peeked");
 
         // <a> * <a>
         // <a> => <a>
@@ -518,10 +863,15 @@ where
                 break;
             }
             if start && token.is_less_than() {
-                tokens.push(self.next().expect("token was peeked"));
+                tokens.push(mem::replace(
+                    &mut last,
+                    self.next().expect("token was peeked"),
+                ));
                 loop {
                     if let Some(ty) = self.next_type() {
-                        tokens.extend(ty.into_iter());
+                        for token in ty {
+                            tokens.push(mem::replace(&mut last, token));
+                        }
                     }
                     // next token can only be `,;>` or None
                     let Some(token) = self.peek() else { break 'outer }; // Invalid expression
@@ -529,10 +879,16 @@ where
                         break 'outer;
                     }
                     if token.is_greater_than() {
-                        tokens.push(self.next().expect("token was peeked"));
+                        tokens.push(mem::replace(
+                            &mut last,
+                            self.next().expect("token was peeked"),
+                        ));
                         break;
                     } else if token.is_comma() {
-                        tokens.push(self.next().expect("token was peeked"));
+                        tokens.push(mem::replace(
+                            &mut last,
+                            self.next().expect("token was peeked"),
+                        ));
                         continue; // Another type
                     };
                 }
@@ -540,11 +896,15 @@ where
             if let Some(token) = self.next() {
                 // TODO this might be too simplistic
                 start = token.is_punct();
-                tokens.push(token);
+                tokens.push(mem::replace(&mut last, token));
             }
         }
 
-        Some(tokens)
+        // ensure that the last punctuation is not joined (i.e. was touching the
+        // terminator, mainly possible in `1..,`)
+        tokens.push(last.alone());
+
+        Some(tokens.into_iter().collect())
     }
 
     /// Returns the next string literal
@@ -666,59 +1026,59 @@ where
 /// even though they diverge from the names used at [`TokenTreePunct`].
 ///
 /// Note that they only match the token with correct [spacing](Spacing), i.e.
-/// [`next_plus`](Self::next_plus) will match `+ =` and `+a` but not `+=`.
+/// [`next_plus`](Self::next_tt_plus) will match `+ =` and `+a` but not `+=`.
 // TODO figure out what the single token ones should return, TokenStream or
 // TokenTree
 impl<I, const PEEKER_LEN: usize> TokenParser<I, PEEKER_LEN>
 where
     I: Iterator<Item = TokenTree>,
 {
-    punct!(
-        "+", [; is_plus], peek_plus, peek_n_plus, next_plus;
-        "-", [; is_minus], peek_minus, peek_n_minus, next_minus;
-        "*", [; is_asterix], peek_star, peek_n_star, next_star;
-        "/", [; is_slash], peek_slash, peek_n_slash, next_slash;
-        "%", [; is_percent], peek_percent, peek_n_percent, next_percent;
-        "^", [; is_caret], peek_caret, peek_n_caret, next_caret;
-        "!", [; is_exclamation], peek_not, peek_n_not, next_not;
-        "&", [; is_and], peek_and, peek_n_and, next_and;
-        "|", [; is_pipe], peek_or, peek_n_or, next_or;
-        "&&", [is_and; is_and], peek_and_and, peek_n_and_and, next_and_and;
-        "||", [is_pipe; is_pipe], peek_or_or, peek_n_or_or, next_or_or;
-        "<<", [is_less_than; is_less_than], peek_shl, peek_n_shl, next_shl;
-        ">>", [is_greater_than; is_greater_than], peek_shr, peek_n_shr, next_shr;
-        "+=", [is_plus; is_equals], peek_plus_eq, peek_n_plus_eq, next_plus_eq;
-        "-=", [is_minus; is_equals], peek_minus_eq, peek_n_minus_eq, next_minus_eq;
-        "*=", [is_asterix; is_equals], peek_star_eq, peek_n_star_eq, next_star_eq;
-        "/=", [is_slash; is_equals], peek_slash_eq, peek_n_slash_eq, next_slash_eq;
-        "%=", [is_percent; is_equals], peek_percent_eq, peek_n_percent_eq, next_percent_eq;
-        "^=", [is_caret; is_equals], peek_caret_eq, peek_n_caret_eq, next_caret_eq;
-        "&=", [is_and; is_equals], peek_and_eq, peek_n_and_eq, next_and_eq;
-        "|=", [is_pipe; is_equals], peek_or_eq, peek_n_or_eq, next_or_eq;
-        "<<=", [is_less_than, is_less_than; is_equals], peek_shl_eq, peek_n_shl_eq, next_shl_eq;
-        ">>=", [is_greater_than, is_greater_than; is_equals], peek_shr_eq, peek_n_shr_eq, next_shr_eq;
-        "=", [; is_equals], peek_eq, peek_n_eq, next_eq;
-        "==", [is_equals; is_equals], peek_eq_eq, peek_n_eq_eq, next_eq_eq;
-        "!=", [is_equals; is_equals], peek_ne, peek_n_ne, next_ne;
-        ">", [; is_greater_than], peek_gt, peek_n_gt, next_gt;
-        "<", [; is_less_than], peek_lt, peek_n_lt, next_lt;
-        ">=", [is_greater_than; is_equals], peek_ge, peek_n_ge, next_ge;
-        "<=", [is_less_than; is_equals], peek_le, peek_n_le, next_le;
-        "@", [; is_at], peek_at, peek_n_at, next_at;
-        ".", [; is_dot], peek_dot, peek_n_dot, next_dot;
-        "..", [is_dot; is_dot], peek_dot_dot, peek_n_dot_dot, next_dot_dot;
-        "...", [is_dot, is_dot; is_dot], peek_dot_dot_dot, peek_n_dot_dot_dot, next_dot_dot_dot;
-        "..=", [is_dot, is_dot; is_equals], peek_dot_dot_eq, peek_n_dot_dot_eq, next_dot_dot_eq;
-        ",", [; is_comma], peek_comma, peek_n_comma, next_comma;
-        ";", [; is_semi], peek_semi, peek_n_semi, next_semi;
-        ":", [; is_colon], peek_colon, peek_n_colon, next_colon;
-        "::", [is_colon; is_colon], peek_path_sep, peek_n_path_sep, next_path_sep;
-        "->", [is_minus; is_greater_than], peek_r_arrow, peek_n_r_arrow, next_r_arrow;
-        "=>", [is_minus; is_greater_than], peek_fat_arrow, peek_n_fat_arrow, next_fat_arrow;
-        "#", [; is_pound], peek_pound, peek_n_pound, next_pound;
-        "$", [; is_dollar], peek_dollar, peek_n_dollar, next_dollar;
-        "?", [; is_question], peek_question, peek_n_question, next_question;
-        "~", [; is_tilde], peek_tilde, peek_n_tilde, next_tilde;
+    punct_tt!(
+        "+", [is_plus !is_equals], peek_tt_plus, peek_n_tt_plus, next_tt_plus;
+        "-", [is_minus !is_equals], peek_tt_minus, peek_n_tt_minus, next_tt_minus;
+        "*", [is_asterix !is_equals], peek_tt_star, peek_n_tt_star, next_tt_star;
+        "/", [is_slash !is_equals], peek_tt_slash, peek_n_tt_slash, next_tt_slash;
+        "%", [is_percent !is_equals], peek_tt_percent, peek_n_tt_percent, next_tt_percent;
+        "^", [is_caret !is_equals], peek_tt_caret, peek_n_tt_caret, next_tt_caret;
+        "!", [is_exclamation !is_equals], peek_tt_not, peek_n_tt_not, next_tt_not;
+        "&", [is_and !is_equals, is_and], peek_tt_and, peek_n_tt_and, next_tt_and;
+        "|", [is_pipe !is_equals, is_pipe], peek_tt_or, peek_n_tt_or, next_tt_or;
+        "&&", [is_and, is_and !is_equals], peek_tt_and_and, peek_n_tt_and_and, next_tt_and_and;
+        "||", [is_pipe, is_pipe !is_equals], peek_tt_or_or, peek_n_tt_or_or, next_tt_or_or;
+        "<<", [is_less_than, is_less_than !is_equals], peek_tt_shl, peek_n_tt_shl, next_tt_shl;
+        ">>", [is_greater_than, is_greater_than !is_equals], peek_tt_shr, peek_n_tt_shr, next_tt_shr;
+        "+=", [is_plus, is_equals], peek_tt_plus_eq, peek_n_tt_plus_eq, next_tt_plus_eq;
+        "-=", [is_minus, is_equals], peek_tt_minus_eq, peek_n_tt_minus_eq, next_tt_minus_eq;
+        "*=", [is_asterix, is_equals], peek_tt_star_eq, peek_n_tt_star_eq, next_tt_star_eq;
+        "/=", [is_slash, is_equals], peek_tt_slash_eq, peek_n_tt_slash_eq, next_tt_slash_eq;
+        "%=", [is_percent, is_equals], peek_tt_percent_eq, peek_n_tt_percent_eq, next_tt_percent_eq;
+        "^=", [is_caret, is_equals], peek_tt_caret_eq, peek_n_tt_caret_eq, next_tt_caret_eq;
+        "&=", [is_and, is_equals], peek_tt_and_eq, peek_n_tt_and_eq, next_tt_and_eq;
+        "|=", [is_pipe, is_equals], peek_tt_or_eq, peek_n_tt_or_eq, next_tt_or_eq;
+        "<<=", [is_less_than, is_less_than, is_equals], peek_tt_shl_eq, peek_n_tt_shl_eq, next_tt_shl_eq;
+        ">>=", [is_greater_than, is_greater_than, is_equals], peek_tt_shr_eq, peek_n_tt_shr_eq, next_tt_shr_eq;
+        "=", [is_equals !is_equals], peek_tt_eq, peek_n_tt_eq, next_tt_eq;
+        "==", [is_equals, is_equals], peek_tt_eq_eq, peek_n_tt_eq_eq, next_tt_eq_eq;
+        "!=", [is_exclamation, is_equals], peek_tt_ne, peek_n_tt_ne, next_tt_ne;
+        ">", [is_greater_than !is_equals], peek_tt_gt, peek_n_tt_gt, next_tt_gt;
+        "<", [is_less_than !is_equals], peek_tt_lt, peek_n_tt_lt, next_tt_lt;
+        ">=", [is_greater_than, is_equals], peek_tt_ge, peek_n_tt_ge, next_tt_ge;
+        "<=", [is_less_than, is_equals], peek_tt_le, peek_n_tt_le, next_tt_le;
+        "@", [is_at], peek_tt_at, peek_n_tt_at, next_tt_at;
+        ".", [is_dot !is_dot], peek_tt_dot, peek_n_tt_dot, next_tt_dot;
+        "..", [is_dot, is_dot !is_dot, is_equals], peek_tt_dot_dot, peek_n_tt_dot_dot, next_tt_dot_dot;
+        "...", [is_dot, is_dot, is_dot], peek_tt_dot_dot_dot, peek_n_tt_dot_dot_dot, next_tt_dot_dot_dot;
+        "..=", [is_dot, is_dot, is_equals], peek_tt_dot_dot_eq, peek_n_tt_dot_dot_eq, next_tt_dot_dot_eq;
+        ",", [is_comma], peek_tt_comma, peek_n_tt_comma, next_tt_comma;
+        ";", [is_semi], peek_tt_semi, peek_n_tt_semi, next_tt_semi;
+        ":", [is_colon !is_colon], peek_tt_colon, peek_n_tt_colon, next_tt_colon;
+        "::", [is_colon, is_colon], peek_tt_path_sep, peek_n_tt_path_sep, next_tt_path_sep;
+        "->", [is_minus, is_greater_than], peek_tt_r_arrow, peek_n_tt_r_arrow, next_tt_r_arrow;
+        "=>", [is_equals, is_greater_than], peek_tt_fat_arrow, peek_n_tt_fat_arrow, next_tt_fat_arrow;
+        "#", [is_pound], peek_tt_pound, peek_n_tt_pound, next_tt_pound;
+        "$", [is_dollar], peek_tt_dollar, peek_n_tt_dollar, next_tt_dollar;
+        "?", [is_question], peek_tt_question, peek_n_tt_question, next_tt_question;
+        "~", [is_tilde], peek_tt_tilde, peek_n_tt_tilde, next_tt_tilde;
     );
 }
 
@@ -759,10 +1119,10 @@ mod test {
         let mut parser = TokenParser::new(quote! {
             -> && ..= >=
         });
-        assert_tokens!(parser.next_r_arrow().unwrap(), { -> });
-        assert_tokens!(parser.next_and_and().unwrap(), { && });
-        assert_tokens!(parser.next_dot_dot_eq().unwrap(), { ..= });
-        assert_tokens!(parser.next_ge().unwrap(), { >= });
+        assert_tokens!(parser.next_tt_r_arrow().unwrap(), { -> });
+        assert_tokens!(parser.next_tt_and_and().unwrap(), { && });
+        assert_tokens!(parser.next_tt_dot_dot_eq().unwrap(), { ..= });
+        assert_tokens!(parser.next_tt_ge().unwrap(), { >= });
     }
 
     #[test]
@@ -779,8 +1139,8 @@ mod test {
         assert!(parser.peek_group().is_none());
         parser.next().unwrap();
         assert!(parser.peek_group().is_some());
-        assert!(parser.peek_n_plus_eq(3).is_some());
-        assert!(parser.peek_n_dot_dot(5).is_some());
+        assert!(parser.peek_n_tt_plus_eq(3).is_some());
+        assert!(parser.peek_n_tt_dot_dot(5).is_some());
     }
 
     #[test]
