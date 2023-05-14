@@ -1,7 +1,10 @@
 use std::ops::{Bound, RangeBounds};
+use std::str::FromStr;
 use std::{iter, mem};
 
-use proc_macro2::{token_stream, Group, Ident, Literal, Punct, Spacing, TokenStream, TokenTree};
+#[cfg(doc)]
+use proc_macro2::Spacing;
+use proc_macro2::{token_stream, Group, Ident, Literal, Punct, TokenStream, TokenTree};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreePunct};
@@ -156,7 +159,7 @@ where
 {
     #[must_use]
     fn from(value: TokenParser<I, PEEKER_LEN>) -> Self {
-        value.iter.collect()
+        value.peek.into_iter().chain(value.iter).collect()
     }
 }
 
@@ -173,6 +176,14 @@ where
         } else {
             Some(self.peek.remove(0))
         }
+    }
+}
+
+impl FromStr for TokenParser {
+    type Err = <TokenStream as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        TokenStream::from_str(s).map(Self::new)
     }
 }
 
@@ -467,7 +478,7 @@ where
             return Some(TokenStream::new());
         }
         // Ensure peek is filled;
-        self.peek_n(len + n)?;
+        self.peek_n(len + n - 1)?;
         let peeked = &self.peek[n..len + n];
         tests.peek(peeked).then(|| {
             peeked[..len - 1]
@@ -854,7 +865,7 @@ where
         let mut start = true;
 
         let mut tokens = TokenStream::new();
-        let mut last = self.next().expect("first token was peeked");
+        let mut last = None;
 
         // <a> * <a>
         // <a> => <a>
@@ -863,14 +874,14 @@ where
                 break;
             }
             if start && token.is_less_than() {
-                tokens.push(mem::replace(
+                tokens.extend(mem::replace(
                     &mut last,
-                    self.next().expect("token was peeked"),
+                    Some(self.next().expect("token was peeked")),
                 ));
                 loop {
                     if let Some(ty) = self.next_type() {
                         for token in ty {
-                            tokens.push(mem::replace(&mut last, token));
+                            tokens.extend(mem::replace(&mut last, Some(token)));
                         }
                     }
                     // next token can only be `,;>` or None
@@ -879,15 +890,15 @@ where
                         break 'outer;
                     }
                     if token.is_greater_than() {
-                        tokens.push(mem::replace(
+                        tokens.extend(mem::replace(
                             &mut last,
-                            self.next().expect("token was peeked"),
+                            Some(self.next().expect("token was peeked")),
                         ));
                         break;
                     } else if token.is_comma() {
-                        tokens.push(mem::replace(
+                        tokens.extend(mem::replace(
                             &mut last,
-                            self.next().expect("token was peeked"),
+                            Some(self.next().expect("token was peeked")),
                         ));
                         continue; // Another type
                     };
@@ -896,13 +907,13 @@ where
             if let Some(token) = self.next() {
                 // TODO this might be too simplistic
                 start = token.is_punct();
-                tokens.push(mem::replace(&mut last, token));
+                tokens.extend(mem::replace(&mut last, Some(token)));
             }
         }
 
         // ensure that the last punctuation is not joined (i.e. was touching the
         // terminator, mainly possible in `1..,`)
-        tokens.push(last.alone());
+        tokens.extend(last.map(TokenTree::alone));
 
         Some(tokens.into_iter().collect())
     }
@@ -1112,17 +1123,28 @@ mod test {
         );
         at.next();
         assert_tokens!(at.next_expression().unwrap(), { "hi" });
+
+        let mut at = TokenParser::from_str("1..,").unwrap();
+        let expr: Vec<_> = at.next_expression().unwrap().into_iter().collect();
+        assert!(expr.last().unwrap().is_alone());
+        assert_tokens!(expr, { 1.. });
     }
 
     #[test]
     fn combined_tokens() {
-        let mut parser = TokenParser::new(quote! {
-            -> && ..= >=
-        });
+        // using from_str to be able to verify behavior of splitting the input correctly
+        // into tts
+        let mut parser = TokenParser::from_str("->&&..=>=+,-..,+=").unwrap();
         assert_tokens!(parser.next_tt_r_arrow().unwrap(), { -> });
         assert_tokens!(parser.next_tt_and_and().unwrap(), { && });
         assert_tokens!(parser.next_tt_dot_dot_eq().unwrap(), { ..= });
         assert_tokens!(parser.next_tt_ge().unwrap(), { >= });
+        assert_tokens!(parser.next_tt_plus().unwrap(), { + });
+        assert_tokens!(parser.next_tt_comma().unwrap(), { , });
+        assert_tokens!(parser.next_tt_minus().unwrap(), { - });
+        assert_tokens!(parser.next_tt_dot_dot().unwrap(), { .. });
+        assert_tokens!(parser.next_tt_comma().unwrap(), { , });
+        assert_tokens!(parser.next_tt_plus_eq().unwrap(), { += });
     }
 
     #[test]

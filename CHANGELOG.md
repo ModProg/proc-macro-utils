@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `*_alone` functions to `TokenParser` setting the last token to `Alone` if it is a punctuation.
 - `next_n` to `TokenParser` returning the next `n` tokens.
 - `peek_range` to `TokenParser` returning a range of tokens.
+- `FromStr` implementation for `TokenParser` based on `TokenStream`'s.
+- `assert_expansion!` macro to unit test macro implementations.
 
 ### Changed
 - **Breaking Change** Added const generic buffer size to `TokenParser`.
@@ -26,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Increased default `TokenParser` peek buffer to `6`.
 - Marked parser functions as must_use.
 - `next_expr` and `next_type` set the last tokens `spacing` to `Alone`.
+
+### Fixed
+- Allow `assert_tokens` in expression position e.g. unbraced `match` arm
 
 ## [0.6.0] - 2023-04-29
 - `TokenParser::next_keyword(v)`

@@ -1,7 +1,10 @@
-//! Some useful functions on `proc_macro` and `proc_macro2` types
+//! Some useful functions on [`proc_macro`] and [`proc_macro2`] types
 //!
 //! E.g. [pushing tokens onto `TokenStream`](TokenStreamExt::push) and [testing
 //! for specific punctuation on `TokenTree` and Punct](TokenTreePunct)
+//!
+//! It also adds the [`assert_tokens!`] and [`assert_expansion!`] macros to
+//! improve unit testability for proc-macros.
 #![warn(clippy::pedantic, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(rustdoc::all)]
@@ -343,4 +346,7 @@ mod test {
             "\"literal\""
         );
     }
+
+    #[test]
+    fn test() {}
 }
