@@ -849,8 +849,8 @@ where
     /// # use proc_macro2::TokenStream;
     /// # use quote::quote;
     ///
-    /// let mut tokens = TokenParser::new(quote! {A + c ::<a, b>::a < b, next_token});
-    /// assert_tokens!(tokens.next_expression().unwrap(), { A + c::<a, b>::a < b });
+    /// let mut tokens = TokenParser::new(quote! {A + c ::<a, b>::a < b + <C as Trait<A, B>::C>::nice(), next_token});
+    /// assert_tokens!(tokens.next_expression().unwrap(), { A + c::<a, b>::a < b + <C as Trait<A, B>::C>::nice()});
     /// assert!(tokens.next_expression().is_none());
     /// assert_tokens!(tokens, { , next_token });
     /// ```
