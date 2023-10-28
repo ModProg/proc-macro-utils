@@ -288,6 +288,25 @@ assert_tokens!(parser.", stringify!($peek_n), "(1).unwrap(), { ", $punct, " });
         pub fn $peek_n(&mut self, n: usize) -> Option<TokenStream> {
             peek_punct!(n, self, $($cond)*)
         })*
+        /// Returns the next token tree as intepreted by the `tt` type in `macro_rules`, i.e., any literal, group,
+        /// or [composed punctionation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
+        pub fn next_tt(&mut self) -> Option<TokenStream> {
+            self.next_if_each(TokenTree::is_group)
+                .or_else(|| self.next_if_each(TokenTree::is_literal))
+                $(.or_else(|| self.$name()))*
+        }
+        /// Peeks the next token tree as intepreted by the `tt` type in `macro_rules`, i.e., any literal, group,
+        /// or [composed punctionation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
+        pub fn peek_tt(&mut self) -> Option<TokenStream> {
+            self.peek_n_tt(0)
+        }
+        /// Peeks the next token tree from the `n`th token as intepreted by the `tt` type in `macro_rules`, i.e., any literal, group,
+        /// or [composed punctionation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
+        pub fn peek_n_tt(&mut self, n: usize) -> Option<TokenStream> {
+            self.peek_if_each(TokenTree::is_group)
+                .or_else(|| self.peek_if_each(TokenTree::is_literal))
+            $(.or_else(|| self.$peek_n(n)))*
+        }
     };
     ([$test:ident $($tests:ident)*]) => {
         matches!(self.peek(), Some(token) if token.$test()) && punct!([$($tests)*])
@@ -812,7 +831,9 @@ where
     /// ```
     #[must_use]
     pub fn next_type(&mut self) -> Option<TokenStream> {
-        let Some(first) = self.peek() else { return None; };
+        let Some(first) = self.peek() else {
+            return None;
+        };
         if first.is_comma() || first.is_semi() {
             return None;
         };
@@ -885,7 +906,9 @@ where
                         }
                     }
                     // next token can only be `,;>` or None
-                    let Some(token) = self.peek() else { break 'outer }; // Invalid expression
+                    let Some(token) = self.peek() else {
+                        break 'outer;
+                    }; // Invalid expression
                     if token.is_semi() {
                         break 'outer;
                     }
