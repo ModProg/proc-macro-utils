@@ -288,20 +288,20 @@ assert_tokens!(parser.", stringify!($peek_n), "(1).unwrap(), { ", $punct, " });
         pub fn $peek_n(&mut self, n: usize) -> Option<TokenStream> {
             peek_punct!(n, self, $($cond)*)
         })*
-        /// Returns the next token tree as intepreted by the `tt` type in `macro_rules`, i.e., any literal, group,
-        /// or [composed punctionation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
+        /// Returns the next token tree as interpreted by the `tt` type in `macro_rules`, i.e., any literal, group,
+        /// or [composed punctuation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
         pub fn next_tt(&mut self) -> Option<TokenStream> {
             self.next_if_each(TokenTree::is_group)
                 .or_else(|| self.next_if_each(TokenTree::is_literal))
                 $(.or_else(|| self.$name()))*
         }
-        /// Peeks the next token tree as intepreted by the `tt` type in `macro_rules`, i.e., any literal, group,
-        /// or [composed punctionation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
+        /// Peeks the next token tree as interpreted by the `tt` type in `macro_rules`, i.e., any literal, group,
+        /// or [composed punctuation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
         pub fn peek_tt(&mut self) -> Option<TokenStream> {
             self.peek_n_tt(0)
         }
-        /// Peeks the next token tree from the `n`th token as intepreted by the `tt` type in `macro_rules`, i.e., any literal, group,
-        /// or [composed punctionation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
+        /// Peeks the next token tree from the `n`th token as interpreted by the `tt` type in `macro_rules`, i.e., any literal, group,
+        /// or [composed punctuation](https://doc.rust-lang.org/reference/tokens.html#punctuation).
         pub fn peek_n_tt(&mut self, n: usize) -> Option<TokenStream> {
             self.peek_if_each(TokenTree::is_group)
                 .or_else(|| self.peek_if_each(TokenTree::is_literal))
@@ -425,6 +425,7 @@ where
     /// assert_tokens!(parser.next_if(TokenTreePunct::is_alone), { : });
     /// ```
     #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn next_if(&mut self, test: impl FnOnce(&TokenTree) -> bool) -> Option<TokenTree> {
         test(self.peek()?).then(|| self.next().expect("was peeked"))
     }
@@ -512,6 +513,7 @@ where
     ///
     /// Returns `None` if empty or `test(first_token) == false`
     #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn next_while(&mut self, mut test: impl FnMut(&TokenTree) -> bool) -> Option<TokenStream> {
         if self.peek().is_none() || !test(self.peek().expect("was peeked")) {
             None
@@ -531,6 +533,7 @@ where
     ///
     /// Returns `None` if empty or `test(first_token) == false`
     #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn next_while_alone(
         &mut self,
         mut test: impl FnMut(&TokenTree) -> bool,
@@ -571,10 +574,10 @@ where
 
     /// Returns the next `n` tokens.
     ///
-    /// Returns `None` if the parser contains less then `n` tokens.
+    /// Returns `None` if the parser contains less than `n` tokens.
     ///
     /// **Note:** This should only be used for small `n` ideally less than
-    /// `PEEKER_LEN`. Otherwise something like this would be more performant:
+    /// `PEEKER_LEN`. Otherwise, something like this would be more performant:
     /// ```
     /// use proc_macro2::TokenStream;
     /// use proc_macro_utils::{TokenParser, assert_tokens};
@@ -596,10 +599,10 @@ where
     /// Returns the next `n` tokens. If the last token is a punct it's
     /// [`spacing`](Punct::spacing()) is set to [`Alone`](Spacing::Alone).
     ///
-    /// Returns `None` if the parser contains less then `n` tokens.
+    /// Returns `None` if the parser contains less than `n` tokens.
     ///
     /// **Note:** This should only be used for small `n` ideally less than
-    /// `PEEKER_LEN`. Otherwise something like this would be more performant:
+    /// `PEEKER_LEN`. Otherwise, something like this would be more performant:
     /// ```
     /// use proc_macro2::TokenStream;
     /// use proc_macro_utils::{TokenParser, assert_tokens, TokenTreePunct};
@@ -621,10 +624,10 @@ where
 
     /// Returns the specified `range` of tokens.
     ///
-    /// Returns `None` if the parser does not contain this `range` tokens.
+    /// Returns `None` if the parser does not contain these `range` tokens.
     ///
     /// **Note:** This should only be used for small and close to start `range`s
-    /// ideally less than `PEEKER_LEN`. Otherwise something like this could be
+    /// ideally less than `PEEKER_LEN`. Otherwise, something like this could be
     /// more performant:
     /// ```
     /// use proc_macro2::TokenStream;
@@ -670,10 +673,10 @@ where
     /// it's [`spacing`](Punct::spacing()) is set to
     /// [`Alone`](Spacing::Alone).
     ///
-    /// Returns `None` if the parser does not contain this `range` tokens.
+    /// Returns `None` if the parser does not contain these `range` tokens.
     ///
     /// **Note:** This should only be used for small and close to start `range`s
-    /// ideally less than `PEEKER_LEN`. Otherwise something like this could be
+    /// ideally less than `PEEKER_LEN`. Otherwise, something like this could be
     /// more performant:
     ///
     /// ```
@@ -799,6 +802,7 @@ where
     /// assert!(parser.next_keyword("anything").is_none());
     /// ```
     #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn next_keyword<K: ?Sized>(&mut self, keyword: &K) -> Option<Ident>
     where
         Ident: PartialEq<K>,
@@ -876,6 +880,7 @@ where
     /// assert_tokens!(tokens, { , next_token });
     /// ```
     #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn next_expression(&mut self) -> Option<TokenStream> {
         if self.peek().is_none()
             || matches!(self.peek(), Some(token) if token.is_comma() || token.is_semi())
@@ -1114,6 +1119,56 @@ where
         "?", [is_question], peek_tt_question, peek_n_tt_question, next_tt_question;
         "~", [is_tilde], peek_tt_tilde, peek_n_tt_tilde, next_tt_tilde;
     );
+
+    /// Returns the next token if it is a [punctuation token tree](https://doc.rust-lang.org/reference/tokens.html#punctuation) following the same rules as [macro_rule's `tt`](https://doc.rust-lang.org/reference/macros-by-example.html#metavariables).
+    ///
+    /// ```
+    /// use proc_macro_utils::{assert_tokens, TokenParser};
+    /// use quote::quote;
+    /// let mut parser = TokenParser::new(quote!(.. =. 1 b));
+    /// assert_tokens!(parser.next_macro_rules_tt().unwrap(), { .. });
+    /// assert_tokens!(parser.next_macro_rules_tt().unwrap(), { = });
+    /// assert_tokens!(parser, { . 1 b });
+    /// ```
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)]
+    pub fn next_macro_rules_tt(&mut self) -> Option<TokenStream> {
+        // ensure that the next 3 tokens are peeked if possible
+        _ = self.peek_n(2);
+        let first = self.peek.first().and_then(TokenTree::punct)?;
+        let second = first
+            .is_joint()
+            .then(|| self.peek.get(1).and_then(TokenTree::punct))
+            .flatten();
+        let third = second
+            .is_some_and(TokenTreePunct::is_joint)
+            .then(|| self.peek.get(2).and_then(TokenTree::punct))
+            .flatten();
+        let chars = [
+            first.as_char(),
+            second.map_or('_', Punct::as_char),
+            third.map_or('_', Punct::as_char),
+        ];
+        if matches!(
+            chars,
+            ['.', '.', '.' | '='] | ['<', '<', '='] | ['>', '>', '=']
+        ) {
+            self.next_n_alone(3)
+        } else if matches!(
+            &chars[0..2],
+            ['&', '&' | '=']
+                | ['|', '|' | '=']
+                | ['<', '<' | '=']
+                | ['>' | '-' | '=', '>']
+                | ['+' | '-' | '*' | '/' | '%' | '^' | '=' | '!' | '>', '=']
+                | ['.', '.']
+                | [':', ':']
+        ) {
+            self.next_n_alone(2)
+        } else {
+            self.next_n_alone(1)
+        }
+    }
 }
 
 #[cfg(test)]

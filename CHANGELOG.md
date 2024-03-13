@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - `*_tt` functions to `TokenParser`
+- `next_macro_rules_tt()` to `TokenParser`
+
+### Fixed
+- `assert_expansion!` was failing on nightly
 
 ## [0.8.0] - 2023-05-14
 ### Fixed

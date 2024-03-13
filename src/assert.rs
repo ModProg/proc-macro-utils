@@ -1,8 +1,8 @@
 /// Allows simple unit testing of proc macro implementations.
 ///
 /// This macro only works with functions taking [`proc_macro2::TokenStream`] due
-/// to the [`proc_macro`] api not being available in unit tests. This can be
-/// achieved either by manually creating a seperate function:
+/// to the [`proc_macro`] API not being available in unit tests. This can be
+/// achieved either by manually creating a separate function:
 /// ```ignore
 /// use proc_macro::TokenStream;
 /// use proc_macro2::TokenStream as TokenStream2;
@@ -253,7 +253,7 @@ macro_rules! assert_tokens {
         $crate::assert_tokens!(@G $lhs, next_bracketed, $aggr, '[', [ $($inner)* ], { $($inner)* }, $($rhs)*);
     };
     (@O $lhs:ident, $aggr:expr, $token:tt $($rhs:tt)*) => {
-        if let Some(lhs) = $lhs.next_punctuation_group().map(|t|t.to_string()).or_else(|| $lhs.next().map(|t|t.to_string())) {
+        if let Some(lhs) = $lhs.next_macro_rules_tt().map(|t|t.to_string()).or_else(|| $lhs.next().map(|t|t.to_string())) {
             if(lhs != stringify!($token)) {
                 $crate::assert_tokens!(@E $aggr, ($token), lhs);
             }
@@ -278,4 +278,6 @@ fn test() {
     assert_tokens!(quote!(more:::test::test:: hello :-D $$$ It should just work), {
         more ::: test ::test:: hello :-D $$$ It should just work
     });
+
+    assert_tokens!(quote!(:$), {: $});
 }
