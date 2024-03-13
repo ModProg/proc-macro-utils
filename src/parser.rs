@@ -4,7 +4,7 @@ use std::{iter, mem};
 
 #[cfg(doc)]
 use proc_macro2::Spacing;
-use proc_macro2::{token_stream, Group, Ident, Literal, Punct, TokenStream, TokenTree};
+use proc_macro2::{token_stream, Group, Ident, Literal, Punct, Span, TokenStream, TokenTree};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreeLiteral, TokenTreePunct};
@@ -362,6 +362,12 @@ impl<I, const PEEKER_LEN: usize> TokenParser<I, PEEKER_LEN>
 where
     I: Iterator<Item = TokenTree>,
 {
+    /// Returns span of the next token or [`Span::call_site()`].
+    #[must_use]
+    pub fn span(&mut self) -> Span {
+        self.peek().map_or_else(Span::call_site, TokenTree::span)
+    }
+
     /// Checks if there are remaining tokens
     /// ```
     /// use proc_macro_utils::TokenParser;
