@@ -9,6 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(rustdoc::all)]
 
+use std::num::ParseIntError;
+use std::str::FromStr;
+
 #[cfg(doc)]
 use proc_macro2::{Punct, Spacing};
 
@@ -29,6 +32,19 @@ mod assert;
 #[doc(hidden)]
 pub mod __private;
 
+mod sealed {
+    pub trait Sealed {}
+
+    macro_rules! sealed {
+        [$($ty:ident),* $(,)?] => {$(
+            impl Sealed for proc_macro::$ty {}
+            impl Sealed for proc_macro2::$ty {}
+        )*};
+    }
+
+    sealed![TokenStream, TokenTree, Punct, Literal, Group];
+}
+
 macro_rules! once {
     (($($tts:tt)*) $($tail:tt)*) => {
         $($tts)*
@@ -44,7 +60,7 @@ macro_rules! attr {
 macro_rules! trait_def {
     ($item_attr:tt, $trait:ident, $($fn_attr:tt, $fn:ident, $({$($gen:tt)*})?, $args:tt, $($ret:ty)?),*) => {
         attr!($item_attr,
-        pub trait $trait {
+        pub trait $trait: crate::sealed::Sealed {
             $(attr!($fn_attr, fn $fn $($($gen)*)? $args $(-> $ret)?;);)*
         });
     };
@@ -63,19 +79,19 @@ macro_rules! impl_via_trait {
         $(#$trait_attr:tt)*
         impl $trait:ident for $type:ident {
             $($(#$fn_attr:tt)*
-            fn $fn:ident $args:tt $(-> $ret:ty)? { $($stmts:tt)* })*
+            fn $fn:ident $({$($gen:tt)*})? ($($args:tt)*)  $(-> $ret:ty)? { $($stmts:tt)* })*
         }
     )+) => {
-        once!($((trait_def!(($($trait_attr)*), $trait, $(($($fn_attr)*), $fn,, $args, $($ret)?),*);))+);
+        once!($((trait_def!(($($trait_attr)*), $trait, $(($($fn_attr)*), $fn,$({$($gen)*})?, ($($args)*), $($ret)?),*);))+);
         #[cfg(feature = "proc-macro")]
         const _: () = {
             use proc_macro::*;
-            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn,, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $({$($gen)*})?, ($($args)*), $($ret)?, {$($stmts)*}),*);)+
         };
         #[cfg(feature = "proc-macro2")]
         const _:() = {
             use proc_macro2::*;
-            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn,, $args, $($ret)?, {$($stmts)*}),*);)+
+            $(trait_impl!($trait, $type, $(($($fn_attr)*), $fn, $({$($gen)*})?, ($($args)*), $($ret)?, {$($stmts)*}),*);)+
         };
     };
     (
@@ -286,6 +302,109 @@ delimited![
     Bracket as is_bracketed: " brackets (`[ ... ]`)",
     None as is_implicitly_delimited: " no delimiters (`Ø ... Ø`)"
 ];
+
+impl_via_trait! {
+    /// Trait to parse literals
+    impl TokenTreeLiteral for TokenTree {
+        /// Tests if the token is a string literal.
+        #[must_use]
+        fn is_string(&self) -> bool {
+            self.literal().is_some_and(TokenTreeLiteral::is_string)
+        }
+
+        /// Returns the string contents if it is a string literal.
+        #[must_use]
+        fn string(&self) -> Option<String> {
+            self.literal().and_then(TokenTreeLiteral::string)
+        }
+    }
+
+    impl TokenTreeLiteral for Literal {
+        fn is_string(&self) -> bool {
+            let s = self.to_string();
+            s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#")
+        }
+        fn string(&self) -> Option<String> {
+            let lit = self.to_string();
+            if lit.starts_with('"') {
+                Some(resolve_escapes(&lit[1..lit.len() - 1]))
+            } else if lit.starts_with('r') {
+                let pounds = lit.chars().skip(1).take_while(|&c| c == '#').count();
+                Some(lit[2 + pounds..lit.len() - pounds - 1].to_owned())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+// Implemented following https://doc.rust-lang.org/reference/tokens.html#string-literals
+// #[allow(clippy::needless_continue)]
+fn resolve_escapes(mut s: &str) -> String {
+    let mut out = String::new();
+    while !s.is_empty() {
+        if s.starts_with('\\') {
+            match s.as_bytes()[1] {
+                b'x' => {
+                    out.push(
+                        char::from_u32(u32::from_str_radix(&s[2..=3], 16).expect("valid escape"))
+                            .expect("valid escape"),
+                    );
+                    s = &s[4..];
+                }
+                b'u' => {
+                    let len = s[3..].find('}').expect("valid escape");
+                    out.push(
+                        char::from_u32(u32::from_str_radix(&s[3..len], 16).expect("valid escape"))
+                            .expect("valid escape"),
+                    );
+                    s = &s[3 + len..];
+                }
+                b'n' => {
+                    out.push('\n');
+                    s = &s[2..];
+                }
+                b'r' => {
+                    out.push('\r');
+                    s = &s[2..];
+                }
+                b't' => {
+                    out.push('\t');
+                    s = &s[2..];
+                }
+                b'\\' => {
+                    out.push('\\');
+                    s = &s[2..];
+                }
+                b'0' => {
+                    out.push('\0');
+                    s = &s[2..];
+                }
+                b'\'' => {
+                    out.push('\'');
+                    s = &s[2..];
+                }
+                b'"' => {
+                    out.push('"');
+                    s = &s[2..];
+                }
+                b'\n' => {
+                    s = &s[..s[2..]
+                        .find(|c: char| !c.is_ascii_whitespace())
+                        .unwrap_or(s.len())];
+                }
+                c => unreachable!(
+                    "TokenStream string literals should only contain valid escapes, found `\\{c}`"
+                ),
+            }
+        } else {
+            let len = s.find('\\').unwrap_or(s.len());
+            out.push_str(&s[..len]);
+            s = &s[len..];
+        }
+    }
+    out
+}
 
 #[cfg(all(test, feature = "proc-macro2"))]
 mod test {

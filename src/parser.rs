@@ -7,7 +7,7 @@ use proc_macro2::Spacing;
 use proc_macro2::{token_stream, Group, Ident, Literal, Punct, TokenStream, TokenTree};
 use smallvec::{smallvec, SmallVec};
 
-use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreePunct};
+use crate::{Delimited, TokenStream2Ext, TokenTree2Ext, TokenTreeLiteral, TokenTreePunct};
 
 // TODO move implementation in a trait implemented on both
 // Peekable<token_stream::IntoIter>s
@@ -949,20 +949,9 @@ where
     /// Returns the next string literal
     #[must_use]
     pub fn next_string(&mut self) -> Option<String> {
-        if !self.peek()?.is_literal() {
-            return None;
-        }
-        let lit = self.peek()?.to_string();
-        if lit.starts_with('"') {
-            self.next();
-            Some(resolve_escapes(&lit[1..lit.len() - 1]))
-        } else if lit.starts_with('r') {
-            self.next();
-            let pounds = lit.chars().skip(1).take_while(|&c| c == '#').count();
-            Some(lit[2 + pounds..lit.len() - pounds - 1].to_owned())
-        } else {
-            None
-        }
+        let lit = self.peek().and_then(TokenTreeLiteral::string)?;
+        self.next();
+        Some(lit)
     }
 
     /// Returns the next boolean literal
@@ -974,73 +963,6 @@ where
         })
         .map(|t| matches!(t.ident(), Some(ident) if ident == "true"))
     }
-}
-// Implemented following https://doc.rust-lang.org/reference/tokens.html#string-literals
-// #[allow(clippy::needless_continue)]
-fn resolve_escapes(mut s: &str) -> String {
-    let mut out = String::new();
-    while !s.is_empty() {
-        if s.starts_with('\\') {
-            match s.as_bytes()[1] {
-                b'x' => {
-                    out.push(
-                        char::from_u32(u32::from_str_radix(&s[2..=3], 16).expect("valid escape"))
-                            .expect("valid escape"),
-                    );
-                    s = &s[4..];
-                }
-                b'u' => {
-                    let len = s[3..].find('}').expect("valid escape");
-                    out.push(
-                        char::from_u32(u32::from_str_radix(&s[3..len], 16).expect("valid escape"))
-                            .expect("valid escape"),
-                    );
-                    s = &s[3 + len..];
-                }
-                b'n' => {
-                    out.push('\n');
-                    s = &s[2..];
-                }
-                b'r' => {
-                    out.push('\r');
-                    s = &s[2..];
-                }
-                b't' => {
-                    out.push('\t');
-                    s = &s[2..];
-                }
-                b'\\' => {
-                    out.push('\\');
-                    s = &s[2..];
-                }
-                b'0' => {
-                    out.push('\0');
-                    s = &s[2..];
-                }
-                b'\'' => {
-                    out.push('\'');
-                    s = &s[2..];
-                }
-                b'"' => {
-                    out.push('"');
-                    s = &s[2..];
-                }
-                b'\n' => {
-                    s = &s[..s[2..]
-                        .find(|c: char| !c.is_ascii_whitespace())
-                        .unwrap_or(s.len())];
-                }
-                c => unreachable!(
-                    "TokenStream string literals should only contain valid escapes, found `\\{c}`"
-                ),
-            }
-        } else {
-            let len = s.find('\\').unwrap_or(s.len());
-            out.push_str(&s[..len]);
-            s = &s[len..];
-        }
-    }
-    out
 }
 
 impl<I, const PEEKER_LEN: usize> TokenParser<I, PEEKER_LEN>
