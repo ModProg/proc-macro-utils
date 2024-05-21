@@ -841,9 +841,7 @@ where
     /// ```
     #[must_use]
     pub fn next_type(&mut self) -> Option<TokenStream> {
-        let Some(first) = self.peek() else {
-            return None;
-        };
+        let first = self.peek()?;
         if first.is_comma() || first.is_semi() {
             return None;
         };
@@ -866,13 +864,14 @@ where
     /// "Parses" an expression
     ///
     /// This just means it collects all the tokens that should belong to the
-    /// expression, until it reaches either:
+    /// expression, until it reaches (outside a group like `()` or `{}`) either:
+    /// - a `=>`
     /// - a `;`
     /// - a `,` outside a type
     /// - the end of the token stream
     ///
-    /// If the token stream is empty, or starts with `,` or `;` [`None`] is
-    /// returned otherwise, [`Some(TokenStream)`](TokenStream) containing
+    /// If the token stream is empty, or starts with `=>`, `,` or `;` [`None`]
+    /// is returned otherwise, [`Some(TokenStream)`](TokenStream) containing
     /// every token up to but excluding the terminator.
     ///
     /// ```
@@ -890,6 +889,7 @@ where
     pub fn next_expression(&mut self) -> Option<TokenStream> {
         if self.peek().is_none()
             || matches!(self.peek(), Some(token) if token.is_comma() || token.is_semi())
+            || self.peek_tt_fat_arrow().is_some()
         {
             return None;
         }
@@ -902,9 +902,10 @@ where
         // <a> * <a>
         // <a> => <a>
         'outer: while let Some(token) = self.peek() {
-            if token.is_semi() || token.is_comma() {
+            if token.is_semi() || token.is_comma() || self.peek_tt_fat_arrow().is_some() {
                 break;
             }
+            let token = self.peek().unwrap();
             if start && token.is_less_than() {
                 tokens.extend(mem::replace(
                     &mut last,
@@ -1120,7 +1121,7 @@ mod test {
     #[test]
     fn expr() {
         let mut at = TokenParser::new(
-            quote! {a + b, <Some, Generic, Type>::something + <a,b> * a < b, "hi"},
+            quote! {a + b, <Some, Generic, Type>::something + <a,b> * a < b, "hi" => hello},
         );
         assert_tokens!(at.next_expression().unwrap(), { a + b });
         at.next();
@@ -1129,6 +1130,9 @@ mod test {
         );
         at.next();
         assert_tokens!(at.next_expression().unwrap(), { "hi" });
+        at.next();
+        at.next();
+        assert_tokens!(at.next_expression().unwrap(), { hello });
 
         let mut at = TokenParser::from_str("1..,").unwrap();
         let expr: Vec<_> = at.next_expression().unwrap().into_iter().collect();

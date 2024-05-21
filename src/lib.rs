@@ -9,9 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(rustdoc::all)]
 
-use std::num::ParseIntError;
-use std::str::FromStr;
-
 #[cfg(doc)]
 use proc_macro2::{Punct, Spacing};
 
