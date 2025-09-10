@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(rustdoc::all)]
 
-#[cfg(doc)]
+#[cfg(all(doc, feature = "proc-macro2"))]
 use proc_macro2::{Punct, Spacing};
 
 #[cfg(feature = "proc-macro")]
@@ -34,7 +34,9 @@ mod sealed {
 
     macro_rules! sealed {
         [$($ty:ident),* $(,)?] => {$(
+            #[cfg(feature = "proc-macro")]
             impl Sealed for proc_macro::$ty {}
+            #[cfg(feature = "proc-macro2")]
             impl Sealed for proc_macro2::$ty {}
         )*};
     }
