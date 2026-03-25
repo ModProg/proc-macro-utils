@@ -6,7 +6,7 @@
 //! It also adds the [`assert_tokens!`] and [`assert_expansion!`] macros to
 //! improve unit testability for `proc-macros`.
 #![warn(clippy::pedantic, missing_docs)]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(rustdoc::all)]
 
 #[cfg(all(doc, feature = "proc-macro2"))]
